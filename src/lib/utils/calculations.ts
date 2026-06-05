@@ -6,6 +6,28 @@ import {
 import { getDaysInMonth, format, parseISO, isWithinInterval, startOfMonth, endOfMonth } from 'date-fns';
 
 // ============================================================
+// ACCOUNT ROLE — one role per account drives every total, so the
+// same money is never counted in two places (Group A).
+//   cash        -> spendable money you can use now
+//   savings     -> money set aside (savings buckets)
+//   investment  -> long-term (SIP, mutual funds, stocks) — net worth only
+//   family      -> household / shared money, kept apart from "yours"
+//   credit_card -> a liability (outstanding owed)
+// Derived from the account's type/flags so nothing extra is required.
+// ============================================================
+export type AccountRole = 'cash' | 'savings' | 'investment' | 'family' | 'credit_card';
+
+export function accountRole(a: Account): AccountRole {
+  if (a.is_credit_card) return 'credit_card';
+  const t = (a.account_type || '').toLowerCase();
+  const o = (a.owner_purpose || '').toLowerCase();
+  if (/invest|long.?term|mutual|stock|equit|brokerage|demat|sip/.test(t)) return 'investment';
+  if (/family|shared|joint/.test(t) || /family|shared/.test(o)) return 'family';
+  if (/saving/.test(t) || a.include_in_goal_savings) return 'savings';
+  return 'cash';
+}
+
+// ============================================================
 // ACCOUNT BALANCE CALCULATION
 // Returns balance per account from all ledger entries.
 //
@@ -137,17 +159,19 @@ export function calculateDashboardKPIs(
   const filteredTx = filterByDateRange(allTransactions, filter) as Transaction[];
 
   // Account balance totals
-  const total_bank_balance = balances
-    .filter(b => !b.is_credit_card && b.account.is_active && b.account.include_in_dashboard)
-    .reduce((s, b) => s + b.balance, 0);
-
+  // Role-based, non-overlapping totals (Group A): each account counts once.
   const spendable_balance = balances
-    .filter(b => !b.is_credit_card && b.account.is_active && b.account.is_spendable)
+    .filter(b => b.account.is_active && accountRole(b.account) === 'cash')
     .reduce((s, b) => s + b.balance, 0);
 
   const savings_balance = balances
-    .filter(b => !b.is_credit_card && b.account.is_active && b.account.include_in_goal_savings)
+    .filter(b => b.account.is_active && accountRole(b.account) === 'savings')
     .reduce((s, b) => s + b.balance, 0);
+
+  // "Bank balance" = your own liquid money (cash + savings). Investments
+  // and family/shared money are deliberately excluded so nothing is
+  // double-counted.
+  const total_bank_balance = spendable_balance + savings_balance;
 
   const total_cc_outstanding = balances
     .filter(b => b.is_credit_card && b.account.is_active)
