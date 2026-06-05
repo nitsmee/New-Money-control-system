@@ -303,11 +303,34 @@ export function calculateBudgetStatus(
   );
 
   return budgets.filter(b => b.is_active && b.include_in_budget).map(budget => {
-    const daily_budget = budget.monthly_budget / daysInMonth;
-    const allowed_till_date = daily_budget * dayOfMonth;
-    const actual_till_date = monthTx
-      .filter(t => t.category === budget.category)
+    const catTx = monthTx.filter(t => t.category === budget.category);
+    const actual_till_date = catTx.reduce((s, t) => s + t.amount, 0);
+    // Fixed bills already posted in this category this month (planned lump sums).
+    const postedFixed = catTx
+      .filter(t => t.is_fixed_expense_auto)
       .reduce((s, t) => s + t.amount, 0);
+    const actualDiscretionary = actual_till_date - postedFixed;
+
+    // The full month's expected fixed bills for this category (the ones that
+    // post as expenses, occurring this month within their start/end window).
+    // These are treated as lump sums, NOT spread across the days — so a bill
+    // that lands on the 1st no longer makes the category look "overspent" (F11).
+    const fixedMonthly = fixedExpenses
+      .filter(fe => fe.is_active && fe.type !== 'saving' && fe.type !== 'investment' && fe.type !== 'transfer' && fe.category === budget.category)
+      .filter(fe => {
+        const occ = safeDueDate(fe.due_day, year, month - 1);
+        if (fe.start_date && occ < fe.start_date) return false;
+        if (fe.end_date && occ > fe.end_date) return false;
+        return true;
+      })
+      .reduce((s, fe) => s + fe.amount, 0);
+
+    // Only the discretionary part of the budget is paced day-by-day.
+    const discretionaryMonthly = Math.max(0, budget.monthly_budget - fixedMonthly);
+    const daily_budget = discretionaryMonthly / daysInMonth;
+    const allowedDiscretionary = daily_budget * dayOfMonth;
+    // Allowed so far = fixed bills already posted + the day-paced discretionary slice.
+    const allowed_till_date = postedFixed + allowedDiscretionary;
 
     const remaining_monthly = budget.monthly_budget - actual_till_date;
     const overspent = Math.max(0, actual_till_date - allowed_till_date);
@@ -317,9 +340,9 @@ export function calculateBudgetStatus(
 
     let status: BudgetStatus['status'] = 'green';
     if (budget.monthly_budget === 0) status = 'grey';
-    else if (actual_till_date > budget.monthly_budget) status = 'red';
-    else if (actual_till_date > allowed_till_date) status = 'red';
-    else if (actual_till_date > allowed_till_date * 0.9) status = 'orange';
+    else if (actual_till_date > budget.monthly_budget) status = 'red';          // over the monthly limit
+    else if (actualDiscretionary > allowedDiscretionary) status = 'red';        // discretionary spending ahead of pace
+    else if (actualDiscretionary > allowedDiscretionary * 0.9) status = 'orange';
     else status = 'green';
 
     return {
