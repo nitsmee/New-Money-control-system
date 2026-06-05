@@ -99,9 +99,6 @@ export default function DashboardPage() {
   const spendable = kpis?.spendable_balance ?? 0;
   const upcoming = kpis?.upcoming_fixed_expenses ?? 0;
   const ccOutstanding = kpis?.total_cc_outstanding ?? 0;
-  // Honest safe-to-spend (can be negative) — same formula the Alerts page uses
-  // (spendable − upcoming bills − card debt − buffer), just not clamped to 0.
-  const trueSafe = Math.round(spendable - upcoming - ccOutstanding - buffer);
 
   // Fixed expenses still DUE this month and not yet posted (matches the
   // corrected "upcoming" total — excludes already-paid and other-month dues).
@@ -124,6 +121,15 @@ export default function DashboardPage() {
   const investAcctIds = useMemo(() => new Set(investBalances.map(b => b.account.id)), [investBalances]);
   const investedPeriod = useMemo(() => transactions.filter(t => t.type === 'saving' && t.date.startsWith(period) && t.to_account_id && investAcctIds.has(t.to_account_id)).reduce((s, t) => s + t.amount, 0), [transactions, period, investAcctIds]);
   const savedPeriod = (kpis?.total_savings ?? 0) - investedPeriod;
+
+  // For Safe-to-Spend, reserve only bank/cash-paid bills — card-charged ones
+  // are already captured in the card outstanding, so counting them here too
+  // would double-count them (F8).
+  const ccAcctIds = useMemo(() => new Set(accounts.filter(a => a.is_credit_card).map(a => a.id)), [accounts]);
+  const bankPaidUpcomingList = useMemo(() => upcomingFixedList.filter(({ fe }) => !(fe.from_account_id && ccAcctIds.has(fe.from_account_id))), [upcomingFixedList, ccAcctIds]);
+  const bankPaidUpcoming = useMemo(() => bankPaidUpcomingList.reduce((s, { fe }) => s + fe.amount, 0), [bankPaidUpcomingList]);
+  // Honest safe-to-spend (can be negative): spendable − bank-paid bills − card debt − buffer.
+  const trueSafe = Math.round(spendable - bankPaidUpcoming - ccOutstanding - buffer);
 
   // Salary detection & monthly limit
   const salaryThisMonth = useMemo(() => income.filter(i => (i.category || '').toLowerCase().includes('salary') && i.date.startsWith(period)).reduce((s, i) => s + i.amount, 0), [income, period]);
@@ -179,13 +185,13 @@ export default function DashboardPage() {
         blurb: trueSafe >= 0 ? 'What you can safely spend after setting aside upcoming bills and your buffer.' : "You're over budget once upcoming bills are set aside.",
         rows: [
           { label: 'Spendable balance', amount: spendable, sign: '+' },
-          { label: 'Upcoming fixed bills', amount: upcoming, sign: '-' },
+          { label: 'Upcoming bank bills', amount: bankPaidUpcoming, sign: '-' },
           { label: 'Credit card outstanding', amount: ccOutstanding, sign: '-' },
           { label: 'Safety buffer', amount: buffer, sign: '-' },
         ],
         totalLabel: 'Safe to spend',
-        listTitle: 'Upcoming bills reserved',
-        list: upcomingFixedList.map(({ fe }) => ({ label: fe.name, amount: fe.amount })),
+        listTitle: 'Bank-paid bills reserved',
+        list: bankPaidUpcomingList.map(({ fe }) => ({ label: fe.name, amount: fe.amount })),
       },
     },
     {
