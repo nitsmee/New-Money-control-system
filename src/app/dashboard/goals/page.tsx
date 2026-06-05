@@ -1,0 +1,251 @@
+'use client';
+import { useState, useMemo } from 'react';
+import { useAppStore } from '@/lib/store/appStore';
+import { createClient } from '@/lib/supabase/client';
+import { Goal } from '@/types';
+import { calculateAccountBalances, analyzeGoal, formatCurrency } from '@/lib/utils/calculations';
+import toast from 'react-hot-toast';
+import { Plus, Pencil, Trash2, X, Check, Target, CheckCircle, AlertTriangle, Clock, TrendingUp, Flag } from 'lucide-react';
+import { RadialBarChart, RadialBar, ResponsiveContainer } from 'recharts';
+
+const GOAL_TYPES = ['Car','Bike','Motorcycle','TV','Mobile / Smartphone','Laptop / Computer','Travel / Vacation','Home Appliance','Furniture','Electronics','Education','Emergency Fund','Home Purchase','Investment','Gadgets','Other'];
+const PRIORITY_LABELS: Record<number, string> = { 1:'Critical', 2:'High', 3:'Medium', 4:'Low', 5:'Optional' };
+const EMPTY: Omit<Goal, 'id'|'user_id'|'created_at'|'updated_at'> = {
+  name:'', goal_type:'', priority:3, expected_cost:0, planned_purchase_date:undefined,
+  amount_allocated:0, monthly_saving_plan:0, payment_plan:'', is_active:true, notes:'',
+};
+
+export default function GoalsPage() {
+  const { goals, accounts, income, transactions, addGoal, updateGoal, removeGoal, settings } = useAppStore();
+  const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState<Goal|null>(null);
+  const [form, setForm] = useState<typeof EMPTY>({...EMPTY});
+  const [saving, setSaving] = useState(false);
+  const sb = createClient();
+  const sym = settings?.currency_symbol ?? '₹';
+
+  const balances = useMemo(() => calculateAccountBalances(accounts, income, transactions), [accounts, income, transactions]);
+  const totalSavings = useMemo(() => balances.filter(b => !b.is_credit_card && b.account.is_active && b.account.include_in_goal_savings).reduce((s,b) => s+b.balance, 0), [balances]);
+  const activeGoals = useMemo(() => goals.filter(g => g.is_active).sort((a,b) => a.priority - b.priority), [goals]);
+  const goalAnalyses = useMemo(() => activeGoals.map(g => analyzeGoal(g, totalSavings)), [activeGoals, totalSavings]);
+
+  const openNew = () => { setEditing(null); setForm({...EMPTY}); setShowForm(true); };
+  const openEdit = (g: Goal) => {
+    setEditing(g);
+    setForm({ name:g.name, goal_type:g.goal_type??'', priority:g.priority, expected_cost:g.expected_cost, planned_purchase_date:g.planned_purchase_date??undefined, amount_allocated:g.amount_allocated, monthly_saving_plan:g.monthly_saving_plan, payment_plan:g.payment_plan??'', is_active:g.is_active, notes:g.notes??'' });
+    setShowForm(true);
+  };
+
+  const handleSave = async () => {
+    if (!form.name || !form.expected_cost) { toast.error('Name and expected cost are required'); return; }
+    setSaving(true);
+    try {
+      const { data: { user } } = await sb.auth.getUser();
+      if (!user) return;
+      const payload = { ...form, expected_cost:+form.expected_cost, amount_allocated:+form.amount_allocated, monthly_saving_plan:+form.monthly_saving_plan, priority:+form.priority, user_id:user.id, planned_purchase_date:form.planned_purchase_date||null };
+      if (editing) {
+        const { data, error } = await sb.from('goals').update(payload).eq('id',editing.id).select().single();
+        if (error) throw error;
+        updateGoal(editing.id, data);
+        toast.success('Goal updated');
+      } else {
+        const { data, error } = await sb.from('goals').insert(payload).select().single();
+        if (error) throw error;
+        addGoal(data);
+        toast.success('Goal added');
+      }
+      setShowForm(false);
+    } catch (e:any) { toast.error(e.message); } finally { setSaving(false); }
+  };
+
+  const handleDelete = async (g: Goal) => {
+    if (!confirm(`Delete goal "${g.name}"?`)) return;
+    try {
+      const { error } = await sb.from('goals').delete().eq('id',g.id);
+      if (error) throw error;
+      removeGoal(g.id);
+      toast.success('Goal deleted');
+    } catch (e:any) { toast.error(e.message); }
+  };
+
+  const riskBadge = (risk: string) => {
+    if (risk==='safe') return 'badge-green';
+    if (risk==='moderate') return 'badge-yellow';
+    if (risk==='risky') return 'badge-red';
+    return 'badge-gray';
+  };
+  const riskLabel = (risk: string) => ({ safe:'✓ Safe', moderate:'⚠ Moderate', risky:'! Risky', not_ready:'× Not Ready' }[risk] ?? risk);
+
+  return (
+    <div className="space-y-5">
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">Goals</h1>
+          <p className="text-sm" style={{ color:'var(--text-secondary)' }}>Plan future purchases — can you afford them?</p>
+        </div>
+        <button onClick={openNew} className="btn-md btn-primary"><Plus size={16}/> Add Goal</button>
+      </div>
+
+      {/* Savings Pool Banner */}
+      <div className="card card-p bg-gradient-to-r from-blue-50 to-emerald-50 dark:from-blue-900/20 dark:to-emerald-900/20 border-blue-200 dark:border-blue-800">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-medium" style={{ color:'var(--text-secondary)' }}>Available Savings Pool</p>
+            <p className="text-3xl font-bold text-blue-700 dark:text-blue-300 mt-0.5">{formatCurrency(totalSavings, sym)}</p>
+            <p className="text-xs mt-1" style={{ color:'var(--text-muted)' }}>From accounts marked "Include in Goal Savings"</p>
+          </div>
+          <div className="text-sm space-y-1">
+            {balances.filter(b => !b.is_credit_card && b.account.is_active && b.account.include_in_goal_savings).map(b => (
+              <div key={b.account.id} className="flex justify-between gap-6">
+                <span style={{ color:'var(--text-secondary)' }}>{b.account.name}</span>
+                <span className="font-semibold text-blue-700 dark:text-blue-300">{formatCurrency(b.balance, sym)}</span>
+              </div>
+            ))}
+            {balances.filter(b => b.account.include_in_goal_savings).length === 0 && (
+              <p className="text-xs" style={{ color:'var(--text-muted)' }}>No savings accounts configured. Enable "Include in Goal Savings" in Settings → Accounts.</p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Goal Cards */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+        {goalAnalyses.length === 0 && (
+          <div className="col-span-full card card-p text-center py-12">
+            <Target size={36} className="mx-auto mb-3 text-slate-300"/>
+            <p className="text-sm" style={{ color:'var(--text-muted)' }}>No goals yet. Add your first goal to see if you can afford it.</p>
+          </div>
+        )}
+        {goalAnalyses.map(({ goal:g, available_saving, remaining_gap, can_buy_now, months_needed, risk_level, suggested_action, progress_percent }) => (
+          <div key={g.id} className={`card card-p group relative overflow-hidden ${can_buy_now ? 'border-emerald-200 dark:border-emerald-700' : ''}`}>
+            {can_buy_now && <div className="absolute top-0 right-0 w-20 h-20 bg-emerald-500/10 rounded-bl-full"/>}
+            <div className="flex items-start justify-between mb-2">
+              <div>
+                <div className="flex items-center gap-2 mb-0.5">
+                  <span className={`badge text-[10px] ${riskBadge(risk_level)}`}>{riskLabel(risk_level)}</span>
+                  <span className="badge badge-gray text-[10px]">{PRIORITY_LABELS[g.priority]}</span>
+                </div>
+                <h3 className="font-bold text-base">{g.name}</h3>
+                {g.goal_type && <p className="text-xs" style={{ color:'var(--text-muted)' }}>{g.goal_type}</p>}
+              </div>
+              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button onClick={() => openEdit(g)} className="btn-icon text-slate-400 hover:text-blue-600"><Pencil size={13}/></button>
+                <button onClick={() => handleDelete(g)} className="btn-icon text-slate-400 hover:text-red-600"><Trash2 size={13}/></button>
+              </div>
+            </div>
+
+            {/* Radial progress */}
+            <div className="flex items-center gap-4 my-3">
+              <div className="w-20 h-20 flex-shrink-0">
+                <ResponsiveContainer width="100%" height="100%">
+                  <RadialBarChart cx="50%" cy="50%" innerRadius="60%" outerRadius="90%" data={[{ value: progress_percent, fill: can_buy_now ? '#22c55e' : risk_level === 'moderate' ? '#f59e0b' : '#3b82f6' }]} startAngle={90} endAngle={-270}>
+                    <RadialBar dataKey="value" cornerRadius={4} background={{ fill: 'var(--bg-subtle)' }} />
+                  </RadialBarChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="text-center -ml-2">
+                <p className={`text-xl font-bold ${can_buy_now ? 'text-emerald-600' : 'text-blue-600'}`}>{progress_percent.toFixed(0)}%</p>
+                <p className="text-xs" style={{ color:'var(--text-muted)' }}>saved</p>
+              </div>
+              <div className="flex-1 space-y-1.5 text-xs">
+                <div className="flex justify-between"><span style={{ color:'var(--text-muted)' }}>Target Cost</span><span className="font-semibold">{formatCurrency(g.expected_cost, sym)}</span></div>
+                <div className="flex justify-between"><span style={{ color:'var(--text-muted)' }}>Available</span><span className="font-semibold text-blue-600">{formatCurrency(available_saving, sym)}</span></div>
+                <div className="flex justify-between"><span style={{ color:'var(--text-muted)' }}>Remaining Gap</span><span className={`font-semibold ${remaining_gap > 0 ? 'amount-negative' : 'amount-positive'}`}>{remaining_gap > 0 ? `-${formatCurrency(remaining_gap, sym)}` : 'Ready!'}</span></div>
+              </div>
+            </div>
+
+            <div className="space-y-1.5 text-xs mb-3" style={{ color:'var(--text-secondary)' }}>
+              {g.monthly_saving_plan > 0 && <div className="flex justify-between"><span>Monthly Saving Plan</span><span className="font-medium">{formatCurrency(g.monthly_saving_plan, sym)}</span></div>}
+              {!can_buy_now && months_needed < 9999 && (
+                <div className="flex justify-between"><span>Months Needed</span><span className="font-medium">{months_needed} months (~{(months_needed/12).toFixed(1)} yrs)</span></div>
+              )}
+              {g.planned_purchase_date && <div className="flex justify-between"><span>Target Date</span><span className="font-medium">{g.planned_purchase_date}</span></div>}
+            </div>
+
+            <div className={`rounded-lg p-2.5 text-xs ${can_buy_now ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300' : risk_level === 'not_ready' ? 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300' : 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300'}`}>
+              <div className="flex items-start gap-1.5">
+                {can_buy_now ? <CheckCircle size={13} className="flex-shrink-0 mt-0.5"/> : months_needed < 12 ? <Clock size={13} className="flex-shrink-0 mt-0.5"/> : <AlertTriangle size={13} className="flex-shrink-0 mt-0.5"/>}
+                <span>{suggested_action}</span>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Form Modal */}
+      {showForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background:'var(--bg-overlay)' }}>
+          <div className="card w-full max-w-xl max-h-[92vh] overflow-y-auto animate-fade-in-up">
+            <div className="flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-700">
+              <h2 className="text-lg font-semibold">{editing ? 'Edit Goal' : 'Add Goal'}</h2>
+              <button onClick={() => setShowForm(false)} className="btn-icon"><X size={18}/></button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="form-group col-span-2">
+                  <label className="form-label">Goal Name *</label>
+                  <input type="text" className="form-input" placeholder="e.g. New Car, iPhone 16" value={form.name} onChange={e => setForm({...form, name:e.target.value})} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Goal Type</label>
+                  <select className="form-select" value={form.goal_type} onChange={e => setForm({...form, goal_type:e.target.value})}>
+                    <option value="">Select…</option>
+                    {GOAL_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Priority</label>
+                  <select className="form-select" value={form.priority} onChange={e => setForm({...form, priority:+e.target.value})}>
+                    {[1,2,3,4,5].map(p => <option key={p} value={p}>{p} — {PRIORITY_LABELS[p]}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="form-group">
+                  <label className="form-label">Expected Cost *</label>
+                  <input type="number" className="form-input" placeholder="0" value={form.expected_cost||''} onChange={e => setForm({...form, expected_cost:+e.target.value})} min="0" step="1000" />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Amount Already Allocated</label>
+                  <input type="number" className="form-input" placeholder="0" value={form.amount_allocated||''} onChange={e => setForm({...form, amount_allocated:+e.target.value})} min="0" step="1000" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="form-group">
+                  <label className="form-label">Monthly Saving Plan</label>
+                  <input type="number" className="form-input" placeholder="0" value={form.monthly_saving_plan||''} onChange={e => setForm({...form, monthly_saving_plan:+e.target.value})} min="0" />
+                  {form.monthly_saving_plan > 0 && form.expected_cost > totalSavings && (
+                    <p className="form-hint">~{Math.ceil((form.expected_cost - totalSavings) / form.monthly_saving_plan)} months to go</p>
+                  )}
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Target Purchase Date</label>
+                  <input type="date" className="form-input" value={form.planned_purchase_date??''} onChange={e => setForm({...form, planned_purchase_date:e.target.value||undefined})} />
+                </div>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Payment Plan / Notes</label>
+                <textarea className="form-textarea" placeholder="e.g. 20% down payment, rest on loan…" value={form.payment_plan||''} onChange={e => setForm({...form, payment_plan:e.target.value})} rows={2} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Additional Notes</label>
+                <textarea className="form-textarea" placeholder="Optional" value={form.notes||''} onChange={e => setForm({...form, notes:e.target.value})} rows={2} />
+              </div>
+              <label className="flex items-center gap-2 cursor-pointer text-sm">
+                <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={form.is_active} onChange={e => setForm({...form, is_active:e.target.checked})} />
+                Active Goal
+              </label>
+            </div>
+            <div className="p-5 border-t border-slate-100 dark:border-slate-700 flex justify-end gap-3">
+              <button onClick={() => setShowForm(false)} className="btn-md btn-secondary">Cancel</button>
+              <button onClick={handleSave} disabled={saving} className="btn-md btn-primary">
+                {saving ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/> : <Check size={16}/>}
+                {saving ? 'Saving…' : editing ? 'Update' : 'Add Goal'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
