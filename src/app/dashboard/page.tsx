@@ -1,10 +1,13 @@
 'use client';
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { useAppStore } from '@/lib/store/appStore';
 import {
   calculateAccountBalances, calculateDashboardKPIs, calculateBudgetStatus,
   buildMonthlyTrends, getCategorySpend, generateAlerts, formatCurrency
 } from '@/lib/utils/calculations';
+import { runAutoProcess } from '@/lib/utils/autoProcess';
+import { createClient } from '@/lib/supabase/client';
+import toast from 'react-hot-toast';
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis,
   CartesianGrid, Tooltip, Legend, ResponsiveContainer
@@ -17,8 +20,11 @@ import Link from 'next/link';
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
+// Runs the recurring catch-up once per app load (module-scoped guard).
+let dashboardAutoRan = false;
+
 export default function DashboardPage() {
-  const { accounts, income, transactions, fixedExpenses, budgets, goals, settings, dateFilter, setDateFilter, isLoading } = useAppStore();
+  const { accounts, income, transactions, fixedExpenses, budgets, goals, categories, settings, dateFilter, setDateFilter, isLoading } = useAppStore();
 
   const now = new Date();
   const [selMonth, setSelMonth] = useState(dateFilter.month ?? now.getMonth() + 1);
@@ -32,12 +38,39 @@ export default function DashboardPage() {
   const trends = useMemo(() => buildMonthlyTrends(income, transactions, 12), [income, transactions]);
   const catSpend = useMemo(() => getCategorySpend(
     transactions.filter(t => { const start = `${selYear}-${String(selMonth).padStart(2,'0')}-01`; const end = `${selYear}-${String(selMonth).padStart(2,'0')}-31`; return t.date >= start && t.date <= end; }),
-    accounts.map(a => ({ name: a.name, color: '#3b82f6' }))
-  ), [transactions, selMonth, selYear, accounts]);
+    categories.map(c => ({ name: c.name, color: c.color }))
+  ), [transactions, selMonth, selYear, categories]);
 
   const activeAlerts = useMemo(() => generateAlerts(budgetStatus, balances, fixedExpenses, settings ?? { safe_spend_buffer: 5000 } as any), [budgetStatus, balances, fixedExpenses, settings]);
 
   const sym = settings?.currency_symbol ?? '₹';
+
+  // Auto-post any due fixed expenses as soon as data is loaded.
+  useEffect(() => {
+    if (isLoading || dashboardAutoRan || fixedExpenses.length === 0) return;
+    dashboardAutoRan = true;
+    (async () => {
+      try {
+        const sb = createClient();
+        const { data: { user } } = await sb.auth.getUser();
+        if (!user) return;
+        const state = useAppStore.getState();
+        const res = await runAutoProcess({
+          userId: user.id,
+          fixedExpenses: state.fixedExpenses,
+          transactions: state.transactions,
+          sb,
+          addTransaction: state.addTransaction,
+          updateFixedExpense: state.updateFixedExpense,
+          asOf: new Date(),
+        });
+        if (res.created > 0) {
+          toast.success(`Auto-posted ${res.created} recurring entr${res.created === 1 ? 'y' : 'ies'} · ${formatCurrency(res.totalAmount, sym)}`);
+        }
+      } catch { /* stay silent on load */ }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoading, fixedExpenses.length]);
 
   if (isLoading) return <LoadingSkeleton />;
 
