@@ -24,7 +24,7 @@ function getTypeConfig(type: TransactionType) {
     case 'credit_card_payment':
       return { needsFrom: true, needsTo: true, needsOwner: false, needsCat: false, label: 'CC Payment', fromLabel: 'Bank Account', toLabel: 'Credit Card' };
     case 'saving':
-      return { needsFrom: true, needsTo: true, needsOwner: false, needsCat: true, label: 'Saving', toLabel: 'Savings Account' };
+      return { needsFrom: true, needsTo: true, needsOwner: false, needsCat: true, label: 'Saving', toLabel: 'Save To Account' };
     case 'initial_balance':
       return { needsFrom: false, needsTo: true, needsOwner: false, needsCat: false, label: 'Initial Balance' };
     case 'initial_cc_outstanding':
@@ -42,6 +42,8 @@ const TYPE_COLOR: Record<TransactionType, string> = {
 };
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+// Rolling year list — auto-extends every year so the app never caps out.
+const YEARS = Array.from({ length: (new Date().getFullYear() + 6) - 2023 }, (_, i) => 2023 + i);
 
 export default function TransactionsPage() {
   const { transactions, accounts, categories, owners, addTransaction, updateTransaction, removeTransaction, settings } = useAppStore();
@@ -60,7 +62,6 @@ export default function TransactionsPage() {
   const activeAccounts = useMemo(() => accounts.filter(a => a.is_active), [accounts]);
   const ccAccounts = useMemo(() => accounts.filter(a => a.is_active && a.is_credit_card), [accounts]);
   const nonCcAccounts = useMemo(() => accounts.filter(a => a.is_active && !a.is_credit_card), [accounts]);
-  const savingsAccounts = useMemo(() => accounts.filter(a => a.is_active && !a.is_credit_card && a.include_in_goal_savings), [accounts]);
   const expenseCategories = useMemo(() => categories.filter(c => (c.type === 'expense' || c.type === 'transfer' || c.type === 'saving' || c.type === 'all') && c.is_active), [categories]);
   const activeOwners = useMemo(() => owners.filter(o => o.is_active), [owners]);
 
@@ -86,7 +87,7 @@ export default function TransactionsPage() {
   };
   const getToAccounts = () => {
     if (form.type === 'credit_card_payment') return ccAccounts;
-    if (form.type === 'saving') return savingsAccounts.length > 0 ? savingsAccounts : nonCcAccounts;
+    if (form.type === 'saving') return nonCcAccounts;
     return activeAccounts;
   };
 
@@ -171,7 +172,7 @@ export default function TransactionsPage() {
             {MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
           </select>
           <select className="form-select text-sm py-1.5 px-3 w-auto" value={filterYear} onChange={e => setFilterYear(+e.target.value)}>
-            {[2023, 2024, 2025, 2026, 2027].map(y => <option key={y} value={y}>{y}</option>)}
+            {YEARS.map(y => <option key={y} value={y}>{y}</option>)}
           </select>
           <select className="form-select text-sm py-1.5 px-3 w-auto" value={filterType} onChange={e => setFilterType(e.target.value as any)}>
             <option value="all">All Types</option>
