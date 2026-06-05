@@ -235,11 +235,24 @@ export function calculateDashboardKPIs(
   // Remaining budget
   const remaining_budget = 0; // calculated separately in budget module
 
-  // Safe to spend
-  const safe_to_spend = Math.max(
-    0,
-    spendable_balance - upcoming_fixed_expenses - total_cc_outstanding - settings.safe_spend_buffer
-  );
+  // Safe to spend — reserve only BANK/cash-paid upcoming bills here. Bills
+  // charged to a credit card are captured in the card outstanding when they
+  // post, so reserving them here as well would double-count them (F8).
+  const ccAcctIds = new Set(accounts.filter(a => a.is_credit_card).map(a => a.id));
+  const bank_paid_upcoming = fixedExpenses
+    .filter(fe => {
+      if (!fe.is_active) return false;
+      if (fe.from_account_id && ccAcctIds.has(fe.from_account_id)) return false; // card-charged -> skip
+      const occ = safeDueDate(fe.due_day, targetYear, targetMonth - 1);
+      if (fe.start_date && occ < fe.start_date) return false;
+      if (fe.end_date && occ > fe.end_date) return false;
+      return !postedFixedKeys.has(`${fe.id}:${targetPeriod}`);
+    })
+    .reduce((s, fe) => s + fe.amount, 0);
+
+  // Keep the true value (can be negative) so every screen shows reality (F9).
+  const safe_to_spend =
+    spendable_balance - bank_paid_upcoming - total_cc_outstanding - settings.safe_spend_buffer;
 
   return {
     total_bank_balance,
