@@ -38,6 +38,7 @@ export default function FixedExpensesPage() {
   const currentPeriod = getCurrentPeriod();
 
   const activeAccounts = useMemo(() => accounts.filter(a => a.is_active), [accounts]);
+  const nonCcAccounts = useMemo(() => accounts.filter(a => a.is_active && !a.is_credit_card), [accounts]);
   const expCats = useMemo(() => categories.filter(c => c.is_active), [categories]);
   const activeOwners = useMemo(() => owners.filter(o => o.is_active), [owners]);
 
@@ -108,6 +109,10 @@ export default function FixedExpensesPage() {
 
   const handleSave = async () => {
     if (!form.name || !form.amount || !form.due_day) { toast.error('Name, amount, and due day are required'); return; }
+    if (!form.from_account_id) { toast.error('Please select a "From Account"'); return; }
+    if ((form.type === 'saving' || form.type === 'investment' || form.type === 'transfer') && !form.to_account_id) {
+      toast.error('Please select a "To Account" — savings/investments must land in an account'); return;
+    }
     setSaving(true);
     try {
       const { data: { user } } = await sb.auth.getUser();
@@ -224,18 +229,23 @@ export default function FixedExpensesPage() {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="form-group">
-                  <label className="form-label">From Account</label>
+                  <label className="form-label">From Account *</label>
                   <select className="form-select" value={form.from_account_id} onChange={e => setForm({ ...form, from_account_id: e.target.value })}>
                     <option value="">Select…</option>
                     {activeAccounts.map(a => <option key={a.id} value={a.id}>{a.name}{a.is_credit_card ? ' (CC)' : ''}</option>)}
                   </select>
                 </div>
                 <div className="form-group">
-                  <label className="form-label">To Account (optional)</label>
+                  <label className="form-label">
+                    To Account{form.type === 'saving' || form.type === 'investment' || form.type === 'transfer' ? ' *' : ' (optional)'}
+                  </label>
                   <select className="form-select" value={form.to_account_id} onChange={e => setForm({ ...form, to_account_id: e.target.value })}>
-                    <option value="">None</option>
-                    {activeAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                    <option value="">{form.type === 'saving' || form.type === 'investment' || form.type === 'transfer' ? 'Select account…' : 'None'}</option>
+                    {(form.type === 'saving' || form.type === 'investment' ? nonCcAccounts : activeAccounts).map(a => <option key={a.id} value={a.id}>{a.name}{a.is_credit_card ? ' (CC)' : ''}</option>)}
                   </select>
+                  {(form.type === 'saving' || form.type === 'investment') && (
+                    <p className="form-hint">Where the money is saved (bank or savings — not a credit card).</p>
+                  )}
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
