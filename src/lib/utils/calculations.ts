@@ -210,8 +210,26 @@ export function calculateDashboardKPIs(
   // FIX: previously the end_date branch dropped the is_active check
   // (precedence bug), so inactive-but-future-dated rows leaked in.
   const today = new Date();
+  // Upcoming = fixed expenses DUE in the selected month that have NOT been
+  // posted yet. This excludes ones already paid this month (F5) and ones
+  // whose charge falls in another month (F6) — so a SIP already taken this
+  // month, or whose next date is next month, no longer inflates the figure.
+  const targetYear = filter.year ?? today.getFullYear();
+  const targetMonth = filter.month ?? today.getMonth() + 1;
+  const targetPeriod = `${targetYear}-${String(targetMonth).padStart(2, '0')}`;
+  const postedFixedKeys = new Set(
+    allTransactions
+      .filter(t => t.fixed_expense_id && t.period)
+      .map(t => `${t.fixed_expense_id}:${t.period}`)
+  );
   const upcoming_fixed_expenses = fixedExpenses
-    .filter(fe => fe.is_active && (!fe.end_date || new Date(fe.end_date) > today))
+    .filter(fe => {
+      if (!fe.is_active) return false;
+      const occ = safeDueDate(fe.due_day, targetYear, targetMonth - 1); // due date this month
+      if (fe.start_date && occ < fe.start_date) return false;           // not started yet
+      if (fe.end_date && occ > fe.end_date) return false;               // already ended
+      return !postedFixedKeys.has(`${fe.id}:${targetPeriod}`);          // not already paid
+    })
     .reduce((s, fe) => s + fe.amount, 0);
 
   // Remaining budget
