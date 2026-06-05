@@ -1,4 +1,4 @@
-import { createServerClient } from '@supabase/ssr';
+import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
 export async function middleware(request: NextRequest) {
@@ -10,7 +10,7 @@ export async function middleware(request: NextRequest) {
     {
       cookies: {
         getAll() { return request.cookies.getAll(); },
-        setAll(cookiesToSet) {
+        setAll(cookiesToSet: { name: string; value: string; options?: CookieOptions }[]) {
           cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
           supabaseResponse = NextResponse.next({ request });
           cookiesToSet.forEach(({ name, value, options }) =>
@@ -22,19 +22,12 @@ export async function middleware(request: NextRequest) {
   );
 
   const { data: { user } } = await supabase.auth.getUser();
-
   const { pathname } = request.nextUrl;
-  const isAuthRoute = pathname.startsWith('/auth');
-  const isDashboard = pathname.startsWith('/dashboard');
-  const isRoot = pathname === '/';
 
-  // Redirect unauthenticated users to login
-  if (!user && (isDashboard || isRoot)) {
+  if (!user && (pathname.startsWith('/dashboard') || pathname === '/')) {
     return NextResponse.redirect(new URL('/auth/login', request.url));
   }
-
-  // Redirect authenticated users away from auth pages
-  if (user && isAuthRoute) {
+  if (user && pathname.startsWith('/auth')) {
     return NextResponse.redirect(new URL('/dashboard', request.url));
   }
 
