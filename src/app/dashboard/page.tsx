@@ -3,7 +3,7 @@ import { useMemo, useState, useEffect, useRef } from 'react';
 import { useAppStore } from '@/lib/store/appStore';
 import {
   calculateAccountBalances, calculateDashboardKPIs, calculateBudgetStatus,
-  buildMonthlyTrends, getCategorySpend, generateAlerts, formatCurrency, nextDueDate, formatDate
+  buildMonthlyTrends, getCategorySpend, generateAlerts, formatCurrency, nextDueDate, formatDate, accountRole
 } from '@/lib/utils/calculations';
 import { runAutoProcess } from '@/lib/utils/autoProcess';
 import { createClient } from '@/lib/supabase/client';
@@ -88,11 +88,20 @@ export default function DashboardPage() {
   // Derived figures
   const bankBalances = useMemo(() => balances.filter(b => !b.is_credit_card && b.account.is_active), [balances]);
   const ccBalances = useMemo(() => balances.filter(b => b.is_credit_card && b.account.is_active), [balances]);
+  const cashBalances = useMemo(() => balances.filter(b => b.account.is_active && accountRole(b.account) === 'cash'), [balances]);
+  const savingsBalances = useMemo(() => balances.filter(b => b.account.is_active && accountRole(b.account) === 'savings'), [balances]);
+  const investBalances = useMemo(() => balances.filter(b => b.account.is_active && accountRole(b.account) === 'investment'), [balances]);
+  const familyBalances = useMemo(() => balances.filter(b => b.account.is_active && accountRole(b.account) === 'family'), [balances]);
+  const investTotal = useMemo(() => investBalances.reduce((s, b) => s + b.balance, 0), [investBalances]);
+  const familyTotal = useMemo(() => familyBalances.reduce((s, b) => s + b.balance, 0), [familyBalances]);
+  const netWorth = (kpis?.spendable_balance ?? 0) + (kpis?.savings_balance ?? 0) + investTotal - (kpis?.total_cc_outstanding ?? 0);
   const buffer = settings?.safe_spend_buffer ?? 0;
   const spendable = kpis?.spendable_balance ?? 0;
   const upcoming = kpis?.upcoming_fixed_expenses ?? 0;
-  // Honest safe-to-spend (can be negative) instead of clamping to 0.
-  const trueSafe = Math.round(spendable - upcoming - buffer);
+  const ccOutstanding = kpis?.total_cc_outstanding ?? 0;
+  // Honest safe-to-spend (can be negative) — same formula the Alerts page uses
+  // (spendable − upcoming bills − card debt − buffer), just not clamped to 0.
+  const trueSafe = Math.round(spendable - upcoming - ccOutstanding - buffer);
 
   const activeFixed = useMemo(() => fixedExpenses.filter(fe => fe.is_active && !(fe.end_date && new Date(fe.end_date) < now)), [fixedExpenses]);
 
@@ -143,6 +152,7 @@ export default function DashboardPage() {
         rows: [
           { label: 'Spendable balance', amount: spendable, sign: '+' },
           { label: 'Upcoming fixed bills', amount: upcoming, sign: '-' },
+          { label: 'Credit card outstanding', amount: ccOutstanding, sign: '-' },
           { label: 'Safety buffer', amount: buffer, sign: '-' },
         ],
         totalLabel: 'Safe to spend',
@@ -151,12 +161,30 @@ export default function DashboardPage() {
       },
     },
     {
-      label: 'Bank balance', value: kpis?.total_bank_balance ?? 0, tone: 'plain', sub: `across ${bankBalances.length} accounts`,
+      label: 'Spendable', value: kpis?.spendable_balance ?? 0, tone: 'plain', sub: 'cash you can spend now',
       detail: {
-        title: 'Bank balance', value: kpis?.total_bank_balance ?? 0, tone: 'plain',
-        blurb: 'Total money across all your non-credit-card accounts.',
-        listTitle: 'Accounts',
-        list: bankBalances.map(b => ({ label: b.account.name, amount: b.balance })),
+        title: 'Spendable', value: kpis?.spendable_balance ?? 0, tone: 'plain',
+        blurb: 'Cash you can spend right now. Excludes savings, investments and family/shared money.',
+        listTitle: 'Cash accounts',
+        list: cashBalances.map(b => ({ label: b.account.name, amount: b.balance })),
+      },
+    },
+    {
+      label: 'Savings', value: kpis?.savings_balance ?? 0, tone: 'plain', sub: 'set aside',
+      detail: {
+        title: 'Savings', value: kpis?.savings_balance ?? 0, tone: 'plain',
+        blurb: 'Money set aside in savings — kept separate from day-to-day spending.',
+        listTitle: 'Savings accounts',
+        list: savingsBalances.map(b => ({ label: b.account.name, amount: b.balance })),
+      },
+    },
+    {
+      label: 'Investments', value: investTotal, tone: 'plain', sub: 'long-term · SIP, funds',
+      detail: {
+        title: 'Investments', value: investTotal, tone: 'plain',
+        blurb: 'Long-term investments such as SIPs. Counted in your net worth, but not in spendable or savings.',
+        listTitle: 'Investment accounts',
+        list: investBalances.map(b => ({ label: b.account.name, amount: b.balance })),
       },
     },
     {
@@ -184,16 +212,19 @@ export default function DashboardPage() {
     {
       label: 'Income this month', value: kpis?.total_income ?? 0, tone: 'pos', sub: `spent ${formatCurrency(kpis?.total_expense ?? 0, sym)}`,
       detail: {
-        title: 'This month', value: kpis?.total_income ?? 0, tone: 'pos',
-        blurb: 'Money in versus money out for the selected month.',
+        title: 'Income this month', value: kpis?.total_income ?? 0, tone: 'pos',
+        blurb: 'Total money received this month, and what is left after spending.',
         rows: [
-          { label: 'Total income', amount: kpis?.total_income ?? 0, sign: '+' },
-          { label: 'Personal expense', amount: kpis?.personal_expense ?? 0, sign: '-' },
-          { label: 'Family / shared expense', amount: kpis?.family_expense ?? 0, sign: '-' },
+          { label: 'True income (salary etc.)', amount: kpis?.true_income ?? 0, sign: '+' },
+          { label: 'Other / family money', amount: (kpis?.total_income ?? 0) - (kpis?.true_income ?? 0), sign: '+' },
         ],
-        totalLabel: 'Net',
-        list: [{ label: 'Of income, counted as "true income"', amount: kpis?.true_income ?? 0, muted: true }],
-        listTitle: 'Note',
+        totalLabel: 'Total income',
+        listTitle: "After this month's spending",
+        list: [
+          { label: 'Personal expense', amount: kpis?.personal_expense ?? 0 },
+          { label: 'Family / shared expense', amount: kpis?.family_expense ?? 0 },
+          { label: 'Left (income − spending)', amount: (kpis?.total_income ?? 0) - (kpis?.total_expense ?? 0) },
+        ],
         link: { href: '/dashboard/transactions', label: 'View transactions' },
       },
     },
@@ -310,8 +341,12 @@ export default function DashboardPage() {
           </button>
         ))}
       </div>
-      <div className="flex items-center gap-1.5 -mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
-        <Info size={13} /> Tap any card to see exactly how it's calculated.
+      <div className="-mt-2 space-y-1 text-xs" style={{ color: 'var(--text-muted)' }}>
+        <div className="flex items-center gap-1.5"><Info size={13} /> Tap any card to see exactly how it's calculated.</div>
+        <div>
+          Net worth (cash + savings + investments − card debt): <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{formatCurrency(netWorth, sym)}</span>
+          {familyTotal !== 0 && <> · Family / shared money tracked separately: <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{formatCurrency(familyTotal, sym)}</span></>}
+        </div>
       </div>
 
       {/* Charts */}
