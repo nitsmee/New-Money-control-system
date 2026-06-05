@@ -1,11 +1,12 @@
 'use client';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useAppStore } from '@/lib/store/appStore';
 import { createClient } from '@/lib/supabase/client';
 import { FixedExpense, FixedExpenseType } from '@/types';
-import { formatCurrency, getCurrentPeriod, isFixedExpenseProcessed } from '@/lib/utils/calculations';
+import { formatCurrency, getCurrentPeriod, nextDueDate, formatDate } from '@/lib/utils/calculations';
+import { runAutoProcess } from '@/lib/utils/autoProcess';
 import toast from 'react-hot-toast';
-import { Plus, Pencil, Trash2, X, Check, Play, AlertTriangle, Calendar } from 'lucide-react';
+import { Plus, Pencil, Trash2, X, Check, Play, AlertTriangle, Calendar, Zap } from 'lucide-react';
 
 const FIXED_TYPES: { value: FixedExpenseType; label: string }[] = [
   { value: 'expense', label: 'Expense' },
@@ -18,11 +19,14 @@ const EMPTY: Omit<FixedExpense, 'id' | 'user_id' | 'created_at' | 'updated_at' |
   name: '', amount: 0, type: 'expense', category: '', owner_purpose: '',
   from_account_id: '', to_account_id: '', due_day: 1,
   start_date: new Date().toISOString().split('T')[0],
-  end_date: undefined, is_active: true, auto_count: false, notes: '', sort_order: 0,
+  end_date: undefined, is_active: true, auto_count: true, notes: '', sort_order: 0,
 };
 
 export default function FixedExpensesPage() {
-  const { fixedExpenses, accounts, categories, owners, addFixedExpense, updateFixedExpense, removeFixedExpense, addTransaction, settings } = useAppStore();
+  const {
+    fixedExpenses, accounts, categories, owners, transactions, isLoading,
+    addFixedExpense, updateFixedExpense, removeFixedExpense, addTransaction, settings,
+  } = useAppStore();
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<FixedExpense | null>(null);
   const [form, setForm] = useState<typeof EMPTY>({ ...EMPTY });
@@ -40,10 +44,55 @@ export default function FixedExpensesPage() {
   const active = useMemo(() => fixedExpenses.filter(fe => fe.is_active).sort((a, b) => a.due_day - b.due_day), [fixedExpenses]);
   const inactive = useMemo(() => fixedExpenses.filter(fe => !fe.is_active), [fixedExpenses]);
 
-  const totalMonthly = useMemo(() => active.reduce((s, fe) => {
-    if (fe.end_date && new Date(fe.end_date) < today) return s;
-    return s + fe.amount;
-  }, 0), [active, today]);
+  // Split the monthly total by type so savings/investments aren't lumped in with spend.
+  const totals = useMemo(() => {
+    const t = { expense: 0, saving: 0, investment: 0, transfer: 0, all: 0 };
+    active.forEach(fe => {
+      if (fe.end_date && new Date(fe.end_date) < today) return;
+      t[fe.type] += fe.amount;
+      t.all += fe.amount;
+    });
+    return t;
+  }, [active, today]);
+
+  // ---- Auto-processing: back-fill missed months + post newly-due ones ----
+  const runCatchUp = async (opts?: { confirmLarge?: boolean; silent?: boolean }) => {
+    try {
+      const { data: { user } } = await sb.auth.getUser();
+      if (!user) return;
+      // Read the freshest data straight from the store to avoid stale closures.
+      const state = useAppStore.getState();
+      const res = await runAutoProcess({
+        userId: user.id,
+        fixedExpenses: state.fixedExpenses,
+        transactions: state.transactions,
+        sb,
+        addTransaction: state.addTransaction,
+        updateFixedExpense: state.updateFixedExpense,
+        asOf: new Date(),
+        confirmBatch: opts?.confirmLarge
+          ? ({ name, count, amount }) =>
+              window.confirm(`"${name}" has ${count} unposted past months. Create ${count} entries totalling ${formatCurrency(amount, sym)} now?`)
+          : undefined,
+      });
+      if (!opts?.silent) {
+        if (res.created > 0) toast.success(`Posted ${res.created} entr${res.created === 1 ? 'y' : 'ies'} · ${formatCurrency(res.totalAmount, sym)}`);
+        res.errors.forEach(e => toast.error(e));
+      }
+      return res;
+    } catch (e: any) {
+      toast.error(e.message);
+    }
+  };
+
+  // Run a catch-up once when data has finished loading.
+  const ranRef = useRef(false);
+  useEffect(() => {
+    if (isLoading || ranRef.current) return;
+    ranRef.current = true;
+    runCatchUp({ silent: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoading]);
 
   const openNew = () => {
     setEditing(null);
@@ -76,38 +125,37 @@ export default function FixedExpensesPage() {
         toast.success('Fixed expense added');
       }
       setShowForm(false);
+      // Immediately back-fill / post any due entries for the saved expense.
+      await runCatchUp({ confirmLarge: true });
     } catch (e: any) { toast.error(e.message); } finally { setSaving(false); }
   };
 
-  // Manually trigger a fixed expense for current period
+  // Manually post a single fixed expense's due entries (back-fills + dedupes).
   const processNow = async (fe: FixedExpense) => {
-    if (isFixedExpenseProcessed(fe, currentPeriod)) { toast.error(`Already processed for ${currentPeriod}`); return; }
     if (fe.end_date && new Date(fe.end_date) < today) { toast.error('This fixed expense has ended'); return; }
     setProcessing(fe.id);
     try {
       const { data: { user } } = await sb.auth.getUser();
       if (!user) return;
-      const txDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(fe.due_day).padStart(2, '0')}`;
-      const txPayload = {
-        user_id: user.id, date: txDate, amount: fe.amount,
-        description: `Auto: ${fe.name}`,
-        type: fe.type === 'expense' ? 'expense' : fe.type === 'saving' || fe.type === 'investment' ? 'saving' : 'transfer',
-        category: fe.category, owner_purpose: fe.owner_purpose,
-        from_account_id: fe.from_account_id, to_account_id: fe.to_account_id,
-        is_fixed_expense_auto: true, fixed_expense_id: fe.id, period: currentPeriod,
-      };
-      const { data: tx, error: txErr } = await sb.from('transactions').insert(txPayload).select().single();
-      if (txErr) throw txErr;
-      addTransaction(tx);
-      const { error: feErr } = await sb.from('fixed_expenses').update({ last_processed_period: currentPeriod }).eq('id', fe.id);
-      if (feErr) throw feErr;
-      updateFixedExpense(fe.id, { last_processed_period: currentPeriod });
-      toast.success(`${fe.name} processed for ${currentPeriod}`);
+      const state = useAppStore.getState();
+      const res = await runAutoProcess({
+        userId: user.id,
+        fixedExpenses: state.fixedExpenses,
+        transactions: state.transactions,
+        sb,
+        addTransaction: state.addTransaction,
+        updateFixedExpense: state.updateFixedExpense,
+        asOf: new Date(),
+        onlyId: fe.id,
+      });
+      if (res && res.created > 0) toast.success(`${fe.name}: posted ${res.created} entr${res.created === 1 ? 'y' : 'ies'}`);
+      else toast.success(`${fe.name} is already up to date`);
+      res?.errors.forEach(e => toast.error(e));
     } catch (e: any) { toast.error(e.message); } finally { setProcessing(null); }
   };
 
   const handleDelete = async (fe: FixedExpense) => {
-    if (!confirm(`Delete "${fe.name}"?`)) return;
+    if (!confirm(`Delete "${fe.name}"? Past transactions already created will remain.`)) return;
     try {
       const { error } = await sb.from('fixed_expenses').delete().eq('id', fe.id);
       if (error) throw error;
@@ -116,22 +164,22 @@ export default function FixedExpensesPage() {
     } catch (e: any) { toast.error(e.message); }
   };
 
-  const isExpired = (fe: FixedExpense) => fe.end_date && new Date(fe.end_date) < today;
-  const isDueThisMonth = (fe: FixedExpense) => {
-    if (isExpired(fe)) return false;
-    if (new Date(fe.start_date) > new Date(`${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(fe.due_day).padStart(2, '0')}`)) return false;
-    return true;
-  };
+  const isExpired = (fe: FixedExpense) => !!fe.end_date && new Date(fe.end_date) < today;
+  const postedThisPeriod = (fe: FixedExpense) => transactions.some(t => t.fixed_expense_id === fe.id && t.period === currentPeriod);
 
   return (
     <div className="space-y-5">
       <div className="page-header">
         <div>
           <h1 className="page-title">Fixed Expenses</h1>
-          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Recurring payments — EMIs, subscriptions, SIPs, bills</p>
+          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Recurring payments — EMIs, subscriptions, SIPs, bills. Auto-posted on each due date.</p>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="text-sm" style={{ color: 'var(--text-muted)' }}>Monthly total: <strong className="amount-negative">{formatCurrency(totalMonthly, sym)}</strong></span>
+        <div className="flex items-center gap-3">
+          <div className="hidden sm:flex items-center gap-3 text-xs" style={{ color: 'var(--text-muted)' }}>
+            {totals.expense > 0 && <span>Expenses: <strong className="amount-negative">{formatCurrency(totals.expense, sym)}</strong></span>}
+            {totals.saving > 0 && <span>Savings: <strong className="text-blue-600">{formatCurrency(totals.saving, sym)}</strong></span>}
+            {totals.investment > 0 && <span>Investments: <strong className="text-purple-600">{formatCurrency(totals.investment, sym)}</strong></span>}
+          </div>
           <button onClick={openNew} className="btn-md btn-primary"><Plus size={16} /> Add Fixed Expense</button>
         </div>
       </div>
@@ -194,6 +242,7 @@ export default function FixedExpensesPage() {
                 <div className="form-group">
                   <label className="form-label">Start Date</label>
                   <input type="date" className="form-input" value={form.start_date} onChange={e => setForm({ ...form, start_date: e.target.value })} />
+                  <p className="form-hint">Missed months from this date are back-filled.</p>
                 </div>
                 <div className="form-group">
                   <label className="form-label">End Date (for EMIs etc.)</label>
@@ -208,7 +257,7 @@ export default function FixedExpensesPage() {
                 </label>
                 <label className="flex items-center gap-2 cursor-pointer text-sm">
                   <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={form.auto_count} onChange={e => setForm({ ...form, auto_count: e.target.checked })} />
-                  Auto Count (auto-generates transaction on due date)
+                  Auto-post on due date (recommended)
                 </label>
               </div>
               <div className="form-group">
@@ -238,9 +287,9 @@ export default function FixedExpensesPage() {
         {active.map(fe => {
           const fromAcc = accounts.find(a => a.id === fe.from_account_id);
           const toAcc = accounts.find(a => a.id === fe.to_account_id);
-          const processed = isFixedExpenseProcessed(fe, currentPeriod);
+          const posted = postedThisPeriod(fe);
           const expired = isExpired(fe);
-          const due = isDueThisMonth(fe);
+          const nd = nextDueDate(fe, today);
 
           return (
             <div key={fe.id} className={`card card-p group transition-all ${expired ? 'opacity-60' : ''}`}>
@@ -253,6 +302,7 @@ export default function FixedExpensesPage() {
               </div>
               <div className="space-y-1 text-xs mb-3" style={{ color: 'var(--text-muted)' }}>
                 <div className="flex justify-between"><span>Due day</span><span className="font-medium" style={{ color: 'var(--text-primary)' }}>{fe.due_day}{fe.due_day === 1 ? 'st' : fe.due_day === 2 ? 'nd' : fe.due_day === 3 ? 'rd' : 'th'} of month</span></div>
+                {!expired && nd && <div className="flex justify-between"><span>Next due</span><span className="font-medium" style={{ color: 'var(--text-primary)' }}>{formatDate(nd)}</span></div>}
                 {fromAcc && <div className="flex justify-between"><span>From</span><span className="font-medium" style={{ color: 'var(--text-primary)' }}>{fromAcc.name}</span></div>}
                 {toAcc && <div className="flex justify-between"><span>To</span><span className="font-medium" style={{ color: 'var(--text-primary)' }}>{toAcc.name}</span></div>}
                 {fe.category && <div className="flex justify-between"><span>Category</span><span>{fe.category}</span></div>}
@@ -260,14 +310,14 @@ export default function FixedExpensesPage() {
               </div>
               <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-100 dark:border-slate-700">
                 <div className="flex items-center gap-1.5">
-                  {processed && <span className="badge badge-green text-[10px]"><Check size={10} /> Processed</span>}
-                  {!processed && due && !expired && <span className="badge badge-yellow text-[10px]"><AlertTriangle size={10} /> Due this month</span>}
+                  {posted && <span className="badge badge-green text-[10px]"><Check size={10} /> Posted this month</span>}
+                  {!posted && !expired && nd && <span className="badge badge-yellow text-[10px]"><AlertTriangle size={10} /> Due {formatDate(nd)}</span>}
                   {expired && <span className="badge badge-gray text-[10px]">Ended</span>}
-                  {fe.auto_count && !expired && <span className="badge badge-blue text-[10px]">Auto</span>}
+                  {fe.auto_count && !expired && <span className="badge badge-blue text-[10px]"><Zap size={10} /> Auto</span>}
                 </div>
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  {!expired && !processed && (
-                    <button onClick={() => processNow(fe)} disabled={processing === fe.id} className="btn-icon text-emerald-600 hover:bg-emerald-50" title="Process now">
+                  {!expired && (
+                    <button onClick={() => processNow(fe)} disabled={processing === fe.id} className="btn-icon text-emerald-600 hover:bg-emerald-50" title="Post due entries now">
                       {processing === fe.id ? <span className="w-3.5 h-3.5 border-2 border-emerald-300 border-t-emerald-600 rounded-full animate-spin" /> : <Play size={14} />}
                     </button>
                   )}
