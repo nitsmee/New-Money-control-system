@@ -3,7 +3,7 @@ import { useState, useMemo } from 'react';
 import { useAppStore } from '@/lib/store/appStore';
 import { createClient } from '@/lib/supabase/client';
 import { Income } from '@/types';
-import { formatCurrency } from '@/lib/utils/calculations';
+import { formatCurrency, calculateAccountBalances, accountRole } from '@/lib/utils/calculations';
 import toast from 'react-hot-toast';
 import { Plus, Pencil, Trash2, X, Check } from 'lucide-react';
 
@@ -19,7 +19,7 @@ const EMPTY: Omit<Income, 'id' | 'user_id' | 'created_at' | 'updated_at'> = {
 };
 
 export default function IncomePage() {
-  const { income, accounts, categories, owners, incomeSources, addIncome, updateIncome, removeIncome, settings } = useAppStore();
+  const { income, accounts, categories, owners, incomeSources, addIncome, updateIncome, removeIncome, settings, transactions, addTransaction } = useAppStore();
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Income | null>(null);
   const [form, setForm] = useState({ ...EMPTY });
@@ -73,10 +73,54 @@ export default function IncomePage() {
         updateIncome(editing.id, data);
         toast.success('Income updated');
       } else {
+        // --- Payday sweep prep: before this salary lands, note how much is
+        // left over in the destination account from before. On payday we move
+        // that leftover into the savings bucket so the salary account resets
+        // to just the new salary. ---
+        const isSalary = (payload.category || '').toLowerCase().includes('salary');
+        const incomePeriod = (payload.date || '').slice(0, 7);
+        const nowPeriod = new Date().toISOString().slice(0, 7);
+        const savings = accounts.find(a => a.is_active && accountRole(a) === 'savings');
+        const alreadySwept = transactions.some(t =>
+          t.type === 'saving' &&
+          (t.description || '').toLowerCase().startsWith('auto: leftover') &&
+          (t.date || '').slice(0, 7) === incomePeriod
+        );
+        let leftover = 0;
+        if (isSalary && incomePeriod === nowPeriod && savings && savings.id !== payload.to_account_id && !alreadySwept) {
+          const balsBefore = calculateAccountBalances(accounts, income, transactions);
+          leftover = Math.round(balsBefore.find(b => b.account.id === payload.to_account_id)?.balance ?? 0);
+        }
+
         const { data, error } = await sb.from('income').insert(payload).select().single();
         if (error) throw error;
         addIncome(data);
         toast.success('Income added');
+
+        // Run the sweep after the salary is recorded.
+        if (leftover > 0 && savings) {
+          const fromName = accounts.find(a => a.id === payload.to_account_id)?.name ?? 'your salary account';
+          const ok = confirm(`${fromName} still has ${formatCurrency(leftover, sym)} left over from before.\n\nMove it into "${savings.name}" so ${fromName} resets to just your new salary?`);
+          if (ok) {
+            const sweepRow = {
+              user_id: user.id,
+              date: payload.date,
+              amount: leftover,
+              description: `Auto: leftover swept to ${savings.name} — ${incomePeriod}`,
+              type: 'saving' as const,
+              category: 'Savings',
+              owner_purpose: 'Personal',
+              from_account_id: payload.to_account_id,
+              to_account_id: savings.id,
+              is_fixed_expense_auto: false,
+              fixed_expense_id: null,
+              period: incomePeriod,
+            };
+            const { data: swData, error: swErr } = await sb.from('transactions').insert(sweepRow).select().single();
+            if (swErr) toast.error('Could not sweep leftover: ' + swErr.message);
+            else { addTransaction(swData); toast.success(`Swept ${formatCurrency(leftover, sym)} to ${savings.name}`); }
+          }
+        }
       }
       setShowForm(false);
     } catch (e: any) {
