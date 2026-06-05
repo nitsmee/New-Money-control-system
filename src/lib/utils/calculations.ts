@@ -186,12 +186,16 @@ export function calculateDashboardKPIs(
   // Period expenses
   const expenses = filteredTx.filter(t => t.type === 'expense');
   const total_expense = expenses.reduce((s, t) => s + t.amount, 0);
-  const personal_expense = expenses
-    .filter(t => t.owner_purpose === 'Personal')
-    .reduce((s, t) => s + t.amount, 0);
-  const family_expense = expenses
-    .filter(t => ['Family / Home', 'Family/Home', 'Shared'].includes(t.owner_purpose ?? ''))
-    .reduce((s, t) => s + t.amount, 0);
+  // Family vs personal is derived from the ACCOUNT's role — money spent from a
+  // family/shared account is family spending — with an owner-label fallback.
+  // This no longer depends on exact hardcoded owner strings (F12), and every
+  // expense lands in exactly one bucket, so the two always add up to the total.
+  const familyAcctIds = new Set(accounts.filter(a => accountRole(a) === 'family').map(a => a.id));
+  const isFamilyExpense = (t: Transaction) =>
+    (!!t.from_account_id && familyAcctIds.has(t.from_account_id)) ||
+    /family|shared|home|joint/i.test(t.owner_purpose ?? '');
+  const family_expense = expenses.filter(isFamilyExpense).reduce((s, t) => s + t.amount, 0);
+  const personal_expense = expenses.filter(t => !isFamilyExpense(t)).reduce((s, t) => s + t.amount, 0);
 
   // Savings
   const total_savings = filteredTx
@@ -507,16 +511,28 @@ export function generateAlerts(
     }
   });
 
-  // Fixed expenses due soon (within 5 days)
+  // Fixed expenses due soon (within 5 days). Clamp the due day to the real
+  // month length so month-end bills (29–31) aren't mis-dated, and look across
+  // the month boundary so a bill due early next month still alerts (F13).
+  const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
   fixedExpenses.filter(fe => fe.is_active).forEach(fe => {
-    const dueThisMonth = new Date(today.getFullYear(), today.getMonth(), fe.due_day);
-    const daysUntil = Math.ceil((dueThisMonth.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    // This month's clamped occurrence (e.g. day 31 in June -> 30 June).
+    let occStr = safeDueDate(fe.due_day, today.getFullYear(), today.getMonth());
+    // If it has already passed, use next month's clamped occurrence instead.
+    if (parseISO(occStr) < todayMidnight) {
+      const ny = today.getMonth() === 11 ? today.getFullYear() + 1 : today.getFullYear();
+      const nm = today.getMonth() === 11 ? 0 : today.getMonth() + 1;
+      occStr = safeDueDate(fe.due_day, ny, nm);
+    }
+    if (fe.start_date && occStr < fe.start_date) return; // not started yet
+    if (fe.end_date && occStr > fe.end_date) return;     // already ended
+    const daysUntil = Math.ceil((parseISO(occStr).getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
     if (daysUntil >= 0 && daysUntil <= 5) {
       alerts.push({
         id: `fixed-due-${fe.id}`,
         type: 'fixed_expense_due',
         title: `Fixed Payment Due: ${fe.name}`,
-        message: `₹${fe.amount.toLocaleString('en-IN')} due in ${daysUntil === 0 ? 'today' : `${daysUntil} days`}.`,
+        message: `₹${fe.amount.toLocaleString('en-IN')} due ${daysUntil === 0 ? 'today' : `in ${daysUntil} day${daysUntil === 1 ? '' : 's'}`}.`,
         severity: daysUntil === 0 ? 'error' : 'warning',
         actionable: false,
       });
