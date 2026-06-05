@@ -3,7 +3,7 @@ import { useMemo, useState, useEffect, useRef } from 'react';
 import { useAppStore } from '@/lib/store/appStore';
 import {
   calculateAccountBalances, calculateDashboardKPIs, calculateBudgetStatus,
-  buildMonthlyTrends, getCategorySpend, generateAlerts, formatCurrency, nextDueDate, formatDate, accountRole
+  buildMonthlyTrends, getCategorySpend, generateAlerts, formatCurrency, formatDate, accountRole, safeDueDate
 } from '@/lib/utils/calculations';
 import { runAutoProcess } from '@/lib/utils/autoProcess';
 import { createClient } from '@/lib/supabase/client';
@@ -103,7 +103,27 @@ export default function DashboardPage() {
   // (spendable − upcoming bills − card debt − buffer), just not clamped to 0.
   const trueSafe = Math.round(spendable - upcoming - ccOutstanding - buffer);
 
-  const activeFixed = useMemo(() => fixedExpenses.filter(fe => fe.is_active && !(fe.end_date && new Date(fe.end_date) < now)), [fixedExpenses]);
+  // Fixed expenses still DUE this month and not yet posted (matches the
+  // corrected "upcoming" total — excludes already-paid and other-month dues).
+  const upcomingFixedList = useMemo(() => {
+    const postedKeys = new Set(transactions.filter(t => t.fixed_expense_id && t.period).map(t => `${t.fixed_expense_id}:${t.period}`));
+    return fixedExpenses
+      .filter(fe => {
+        if (!fe.is_active) return false;
+        const occ = safeDueDate(fe.due_day, selYear, selMonth - 1);
+        if (fe.start_date && occ < fe.start_date) return false;
+        if (fe.end_date && occ > fe.end_date) return false;
+        return !postedKeys.has(`${fe.id}:${period}`);
+      })
+      .map(fe => ({ fe, occ: safeDueDate(fe.due_day, selYear, selMonth - 1) }))
+      .sort((a, b) => a.occ.localeCompare(b.occ));
+  }, [fixedExpenses, transactions, selYear, selMonth, period]);
+
+  // Split this month's "saving" transactions into true savings vs investments
+  // (a saving whose destination is an investment account is an investment).
+  const investAcctIds = useMemo(() => new Set(investBalances.map(b => b.account.id)), [investBalances]);
+  const investedPeriod = useMemo(() => transactions.filter(t => t.type === 'saving' && t.date.startsWith(period) && t.to_account_id && investAcctIds.has(t.to_account_id)).reduce((s, t) => s + t.amount, 0), [transactions, period, investAcctIds]);
+  const savedPeriod = (kpis?.total_savings ?? 0) - investedPeriod;
 
   // Salary detection & monthly limit
   const salaryThisMonth = useMemo(() => income.filter(i => (i.category || '').toLowerCase().includes('salary') && i.date.startsWith(period)).reduce((s, i) => s + i.amount, 0), [income, period]);
@@ -142,6 +162,14 @@ export default function DashboardPage() {
 
   if (isLoading) return <LoadingSkeleton />;
 
+  // Net-cashflow breakdown rows — savings split out from investments.
+  const netRows: DetailRow[] = [
+    { label: 'Income', amount: kpis?.total_income ?? 0, sign: '+' },
+    { label: 'Expenses', amount: kpis?.total_expense ?? 0, sign: '-' },
+    { label: 'Moved to savings', amount: savedPeriod, sign: '-' },
+  ];
+  if (investedPeriod !== 0) netRows.push({ label: 'Invested (SIP, funds)', amount: investedPeriod, sign: '-' });
+
   // ---- Card definitions (value + the detail panel each opens) ----
   const cards: { label: string; value: number; tone: 'pos' | 'neg' | 'plain'; sub: string; detail: DetailData }[] = [
     {
@@ -156,8 +184,8 @@ export default function DashboardPage() {
           { label: 'Safety buffer', amount: buffer, sign: '-' },
         ],
         totalLabel: 'Safe to spend',
-        listTitle: 'Upcoming bills included',
-        list: activeFixed.map(fe => ({ label: fe.name, amount: fe.amount })),
+        listTitle: 'Upcoming bills reserved',
+        list: upcomingFixedList.map(({ fe }) => ({ label: fe.name, amount: fe.amount })),
       },
     },
     {
@@ -200,12 +228,8 @@ export default function DashboardPage() {
       label: 'Net cashflow', value: kpis?.net_cashflow ?? 0, tone: (kpis?.net_cashflow ?? 0) >= 0 ? 'pos' : 'neg', sub: 'income − exp − savings',
       detail: {
         title: 'Net cashflow', value: kpis?.net_cashflow ?? 0, tone: (kpis?.net_cashflow ?? 0) >= 0 ? 'pos' : 'neg',
-        blurb: 'What is left this month after spending and money moved to savings.',
-        rows: [
-          { label: 'Income', amount: kpis?.total_income ?? 0, sign: '+' },
-          { label: 'Expenses', amount: kpis?.total_expense ?? 0, sign: '-' },
-          { label: 'Moved to savings', amount: kpis?.total_savings ?? 0, sign: '-' },
-        ],
+        blurb: 'What is left this month after spending and money moved to savings or investments.',
+        rows: netRows,
         totalLabel: 'Net cashflow',
       },
     },
@@ -229,12 +253,12 @@ export default function DashboardPage() {
       },
     },
     {
-      label: 'Upcoming fixed', value: upcoming, tone: 'plain', sub: 'due soon',
+      label: 'Upcoming fixed', value: upcoming, tone: 'plain', sub: 'still due this month',
       detail: {
         title: 'Upcoming fixed payments', value: upcoming, tone: 'plain',
-        blurb: 'Recurring payments still expected — EMIs, subscriptions, SIPs and bills.',
-        listTitle: 'Active fixed expenses',
-        list: activeFixed.map(fe => ({ label: `${fe.name}${nextDueDate(fe, now) ? ' · ' + formatDate(nextDueDate(fe, now)!) : ''}`, amount: fe.amount })),
+        blurb: "Recurring payments still due this month that you haven't paid yet. Ones already paid this month, or due in another month, aren't counted.",
+        listTitle: 'Due this month, not yet paid',
+        list: upcomingFixedList.map(({ fe, occ }) => ({ label: `${fe.name} · ${formatDate(occ)}`, amount: fe.amount })),
         link: { href: '/dashboard/fixed-expenses', label: 'Manage fixed expenses' },
       },
     },
