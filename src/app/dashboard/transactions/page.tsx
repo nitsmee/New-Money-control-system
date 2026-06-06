@@ -2,470 +2,355 @@
 import { useState, useMemo } from 'react';
 import { useAppStore } from '@/lib/store/appStore';
 import { createClient } from '@/lib/supabase/client';
-import { Account, Category, Owner, UserSettings } from '@/types';
+import { Transaction, TransactionType, TRANSACTION_TYPES } from '@/types';
+import { formatCurrency } from '@/lib/utils/calculations';
 import toast from 'react-hot-toast';
-import { Plus, Pencil, Trash2, X, Check, Settings, Database, User, Tag, Wallet, Download, Upload } from 'lucide-react';
-import Papa from 'papaparse';
+import { Plus, Pencil, Trash2, X, Check, Filter } from 'lucide-react';
 
-type Tab = 'accounts'|'categories'|'owners'|'preferences';
+const EMPTY = {
+  date: new Date().toISOString().split('T')[0],
+  amount: 0, description: '', type: 'expense' as TransactionType,
+  category: '', owner_purpose: 'Personal',
+  from_account_id: '', to_account_id: '', notes: '',
+};
 
-export default function SettingsPage() {
-  const { accounts, categories, owners, settings, addAccount, updateAccount, removeAccount, addCategory, updateCategory, removeCategory, addOwner, updateOwner, removeOwner, updateSettings, transactions, income } = useAppStore();
-  const [tab, setTab] = useState<Tab>('accounts');
+// Returns which fields are required/visible per transaction type
+function getTypeConfig(type: TransactionType) {
+  switch (type) {
+    case 'expense':
+      return { needsFrom: true, needsTo: false, needsOwner: true, needsCat: true, label: 'Expense' };
+    case 'transfer':
+      return { needsFrom: true, needsTo: true, needsOwner: false, needsCat: true, label: 'Transfer' };
+    case 'credit_card_payment':
+      return { needsFrom: true, needsTo: true, needsOwner: false, needsCat: false, label: 'CC Payment', fromLabel: 'Bank Account', toLabel: 'Credit Card' };
+    case 'saving':
+      return { needsFrom: true, needsTo: true, needsOwner: false, needsCat: true, label: 'Saving', toLabel: 'Save To Account' };
+    case 'initial_balance':
+      return { needsFrom: false, needsTo: true, needsOwner: false, needsCat: false, label: 'Initial Balance' };
+    case 'initial_cc_outstanding':
+      return { needsFrom: true, needsTo: false, needsOwner: false, needsCat: false, label: 'Initial CC Outstanding', fromLabel: 'Credit Card' };
+    case 'adjustment':
+      return { needsFrom: false, needsTo: true, needsOwner: false, needsCat: false, label: 'Adjustment' };
+    default:
+      return { needsFrom: true, needsTo: false, needsOwner: true, needsCat: true, label: 'Transaction' };
+  }
+}
+
+const TYPE_COLOR: Record<TransactionType, string> = {
+  expense: 'badge-red', transfer: 'badge-gray', credit_card_payment: 'badge-yellow',
+  saving: 'badge-blue', initial_balance: 'badge-green', initial_cc_outstanding: 'badge-red', adjustment: 'badge-gray',
+};
+
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+// Rolling year list — auto-extends every year so the app never caps out.
+const YEARS = Array.from({ length: (new Date().getFullYear() + 6) - 2023 }, (_, i) => 2023 + i);
+
+export default function TransactionsPage() {
+  const { transactions, accounts, categories, owners, addTransaction, updateTransaction, removeTransaction, settings } = useAppStore();
+  const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState<Transaction | null>(null);
+  const [form, setForm] = useState({ ...EMPTY });
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [filterMonth, setFilterMonth] = useState(new Date().getMonth() + 1);
+  const [filterYear, setFilterYear] = useState(new Date().getFullYear());
+  const [filterType, setFilterType] = useState<TransactionType | 'all'>('all');
   const sb = createClient();
   const sym = settings?.currency_symbol ?? '₹';
 
-  // ---- ACCOUNTS ----
-  const [showAccForm, setShowAccForm] = useState(false);
-  const [editingAcc, setEditingAcc] = useState<Account|null>(null);
-  const [accForm, setAccForm] = useState({ name:'', account_type:'Bank Account', owner_purpose:'', is_active:true, include_in_dashboard:true, include_in_goal_savings:false, is_credit_card:false, is_spendable:true, notes:'' });
+  const cfg = getTypeConfig(form.type);
+  const activeAccounts = useMemo(() => accounts.filter(a => a.is_active), [accounts]);
+  const ccAccounts = useMemo(() => accounts.filter(a => a.is_active && a.is_credit_card), [accounts]);
+  const nonCcAccounts = useMemo(() => accounts.filter(a => a.is_active && !a.is_credit_card), [accounts]);
+  const expenseCategories = useMemo(() => categories.filter(c => (c.type === 'expense' || c.type === 'transfer' || c.type === 'saving' || c.type === 'all') && c.is_active), [categories]);
+  const activeOwners = useMemo(() => owners.filter(o => o.is_active), [owners]);
 
-  const openNewAcc = () => { setEditingAcc(null); setAccForm({ name:'', account_type:'Bank Account', owner_purpose:'', is_active:true, include_in_dashboard:true, include_in_goal_savings:false, is_credit_card:false, is_spendable:true, notes:'' }); setShowAccForm(true); };
-  const openEditAcc = (a: Account) => { setEditingAcc(a); setAccForm({ name:a.name, account_type:a.account_type, owner_purpose:a.owner_purpose??'', is_active:a.is_active, include_in_dashboard:a.include_in_dashboard, include_in_goal_savings:a.include_in_goal_savings, is_credit_card:a.is_credit_card, is_spendable:a.is_spendable, notes:a.notes??'' }); setShowAccForm(true); };
+  const filtered = useMemo(() => {
+    const start = `${filterYear}-${String(filterMonth).padStart(2, '0')}-01`;
+    const end = `${filterYear}-${String(filterMonth).padStart(2, '0')}-31`;
+    return transactions
+      .filter(t => t.date >= start && t.date <= end && (filterType === 'all' || t.type === filterType))
+      .sort((a, b) => b.date.localeCompare(a.date));
+  }, [transactions, filterMonth, filterYear, filterType]);
 
-  const hasTransactions = (accId: string) =>
-    transactions.some(t => t.from_account_id===accId || t.to_account_id===accId) ||
-    income.some(i => i.to_account_id===accId);
+  const totals = useMemo(() => ({
+    expense: filtered.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0),
+    saving: filtered.filter(t => t.type === 'saving').reduce((s, t) => s + t.amount, 0),
+    cc_payment: filtered.filter(t => t.type === 'credit_card_payment').reduce((s, t) => s + t.amount, 0),
+  }), [filtered]);
 
-  const saveAcc = async () => {
-    if (!accForm.name) { toast.error('Account name is required'); return; }
-    try {
-      const { data: { user } } = await sb.auth.getUser();
-      if (!user) return;
-      const payload = { ...accForm, user_id:user.id };
-      if (editingAcc) {
-        const { data, error } = await sb.from('accounts').update(payload).eq('id',editingAcc.id).select().single();
-        if (error) throw error;
-        updateAccount(editingAcc.id, data);
-        toast.success('Account updated');
-      } else {
-        const { data, error } = await sb.from('accounts').insert(payload).select().single();
-        if (error) throw error;
-        addAccount(data);
-        toast.success('Account added');
-      }
-      setShowAccForm(false);
-    } catch (e:any) { toast.error(e.message); }
+  const getFromAccounts = () => {
+    if (form.type === 'credit_card_payment') return nonCcAccounts;
+    if (form.type === 'initial_cc_outstanding') return ccAccounts;
+    if (form.type === 'expense' || form.type === 'saving' || form.type === 'transfer') return activeAccounts;
+    return activeAccounts;
+  };
+  const getToAccounts = () => {
+    if (form.type === 'credit_card_payment') return ccAccounts;
+    if (form.type === 'saving') return nonCcAccounts;
+    return activeAccounts;
   };
 
-  const deleteAcc = async (a: Account) => {
-    if (hasTransactions(a.id)) {
-      if (!confirm(`"${a.name}" has transactions. It will be deactivated (not deleted) to preserve history.`)) return;
-      const { error } = await sb.from('accounts').update({ is_active:false }).eq('id',a.id);
-      if (!error) { updateAccount(a.id, { is_active:false }); toast.success(`"${a.name}" deactivated`); }
-      return;
+  // A category can carry a default "from" account (set in Settings → Categories).
+  // This resolves it, but only if that account is still active.
+  const defaultFromForCategory = (catName: string): string | null => {
+    const cat = categories.find(c => c.name === catName);
+    const def = cat?.default_account_id;
+    return def && accounts.some(a => a.id === def && a.is_active) ? def : null;
+  };
+
+  const openNew = () => {
+    setEditing(null);
+    const firstCat = expenseCategories[0]?.name ?? '';
+    setForm({ ...EMPTY, from_account_id: defaultFromForCategory(firstCat) ?? (nonCcAccounts[0]?.id ?? ''), category: firstCat, owner_purpose: activeOwners[0]?.name ?? 'Personal' });
+    setShowForm(true);
+  };
+  const openEdit = (tx: Transaction) => {
+    setEditing(tx);
+    setForm({ date: tx.date, amount: tx.amount, description: tx.description ?? '', type: tx.type, category: tx.category ?? '', owner_purpose: tx.owner_purpose ?? 'Personal', from_account_id: tx.from_account_id ?? '', to_account_id: tx.to_account_id ?? '', notes: tx.notes ?? '' });
+    setShowForm(true);
+  };
+
+  const validate = () => {
+    if (!form.date || !form.amount || form.amount <= 0) { toast.error('Date and amount are required'); return false; }
+    if (cfg.needsFrom && !form.from_account_id) { toast.error(`Please select ${cfg.fromLabel ?? 'From Account'}`); return false; }
+    if (cfg.needsTo && !form.to_account_id) { toast.error(`Please select ${cfg.toLabel ?? 'To Account'}`); return false; }
+    if (form.type === 'credit_card_payment') {
+      const toAcc = accounts.find(a => a.id === form.to_account_id);
+      if (!toAcc?.is_credit_card) { toast.error('To Account must be a Credit Card for bill payments'); return false; }
     }
-    if (!confirm(`Delete account "${a.name}"?`)) return;
-    const { error } = await sb.from('accounts').delete().eq('id',a.id);
-    if (!error) { removeAccount(a.id); toast.success('Account deleted'); }
-    else toast.error(error.message);
+    return true;
   };
 
-  // ---- CATEGORIES ----
-  const [showCatForm, setShowCatForm] = useState(false);
-  const [editingCat, setEditingCat] = useState<Category|null>(null);
-  const [catForm, setCatForm] = useState({ name:'', type:'expense' as Category['type'], include_in_budget:true, color:'#3b82f6', is_active:true, default_account_id:'' });
-
-  const openNewCat = () => { setEditingCat(null); setCatForm({ name:'', type:'expense', include_in_budget:true, color:'#3b82f6', is_active:true, default_account_id:'' }); setShowCatForm(true); };
-  const openEditCat = (c: Category) => { setEditingCat(c); setCatForm({ name:c.name, type:c.type, include_in_budget:c.include_in_budget, color:c.color, is_active:c.is_active, default_account_id:c.default_account_id ?? '' }); setShowCatForm(true); };
-
-  const hasCatTransactions = (name: string) => transactions.some(t => t.category===name) || income.some(i => i.category===name);
-
-  const saveCat = async () => {
-    if (!catForm.name) { toast.error('Category name is required'); return; }
+  const handleSave = async () => {
+    if (!validate()) return;
+    setSaving(true);
     try {
       const { data: { user } } = await sb.auth.getUser();
-      if (!user) return;
-      const payload = { ...catForm, user_id:user.id, icon:'tag', default_account_id: catForm.default_account_id || null };
-      if (editingCat) {
-        const { data, error } = await sb.from('categories').update(payload).eq('id',editingCat.id).select().single();
+      if (!user) { toast.error('Not authenticated'); return; }
+      const period = form.date.slice(0, 7);
+      const payload = {
+        ...form, amount: +form.amount, user_id: user.id, period,
+        from_account_id: form.from_account_id || null,
+        to_account_id: form.to_account_id || null,
+        category: form.category || null,
+        owner_purpose: form.owner_purpose || null,
+      };
+      if (editing) {
+        const { data, error } = await sb.from('transactions').update(payload).eq('id', editing.id).select().single();
         if (error) throw error;
-        updateCategory(editingCat.id, data);
-        toast.success('Category updated');
+        updateTransaction(editing.id, data);
+        toast.success('Transaction updated');
       } else {
-        const { data, error } = await sb.from('categories').insert(payload).select().single();
+        const { data, error } = await sb.from('transactions').insert(payload).select().single();
         if (error) throw error;
-        addCategory(data);
-        toast.success('Category added');
+        addTransaction(data);
+        toast.success('Transaction added');
       }
-      setShowCatForm(false);
-    } catch (e:any) { toast.error(e.message); }
+      setShowForm(false);
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally { setSaving(false); }
   };
 
-  const deleteCat = async (c: Category) => {
-    if (hasCatTransactions(c.name)) {
-      if (!confirm(`"${c.name}" has transactions. It will be deactivated to preserve history.`)) return;
-      const { error } = await sb.from('categories').update({ is_active:false }).eq('id',c.id);
-      if (!error) { updateCategory(c.id, { is_active:false }); toast.success(`"${c.name}" deactivated`); }
-      return;
-    }
-    if (!confirm(`Delete category "${c.name}"?`)) return;
-    const { error } = await sb.from('categories').delete().eq('id',c.id);
-    if (!error) { removeCategory(c.id); toast.success('Category deleted'); }
-    else toast.error(error.message);
-  };
-
-  // ---- OWNERS ----
-  const [showOwnerForm, setShowOwnerForm] = useState(false);
-  const [editingOwner, setEditingOwner] = useState<Owner|null>(null);
-  const [ownerForm, setOwnerForm] = useState({ name:'', description:'', color:'#6366f1', is_active:true });
-
-  const openNewOwner = () => { setEditingOwner(null); setOwnerForm({ name:'', description:'', color:'#6366f1', is_active:true }); setShowOwnerForm(true); };
-  const openEditOwner = (o: Owner) => { setEditingOwner(o); setOwnerForm({ name:o.name, description:o.description??'', color:o.color, is_active:o.is_active }); setShowOwnerForm(true); };
-
-  const saveOwner = async () => {
-    if (!ownerForm.name) { toast.error('Name is required'); return; }
+  const handleDelete = async (id: string) => {
+    if (!confirm('Delete this transaction? This cannot be undone.')) return;
+    setDeleting(id);
     try {
-      const { data: { user } } = await sb.auth.getUser();
-      if (!user) return;
-      const payload = { ...ownerForm, user_id:user.id };
-      if (editingOwner) {
-        const { data, error } = await sb.from('owners').update(payload).eq('id',editingOwner.id).select().single();
-        if (error) throw error;
-        updateOwner(editingOwner.id, data);
-        toast.success('Owner updated');
-      } else {
-        const { data, error } = await sb.from('owners').insert(payload).select().single();
-        if (error) throw error;
-        addOwner(data);
-        toast.success('Owner added');
-      }
-      setShowOwnerForm(false);
-    } catch (e:any) { toast.error(e.message); }
-  };
-
-  // ---- PREFERENCES ----
-  const [prefForm, setPrefForm] = useState({ theme: settings?.theme??'light', font_choice: settings?.font_choice??'dm-sans', currency: settings?.currency??'INR', currency_symbol: settings?.currency_symbol??'₹', safe_spend_buffer: settings?.safe_spend_buffer??5000, sweep_enabled: settings?.sweep_enabled ?? true });
-  const [savingPrefs, setSavingPrefs] = useState(false);
-
-  const savePrefs = async () => {
-    setSavingPrefs(true);
-    try {
-      const { data: { user } } = await sb.auth.getUser();
-      if (!user) return;
-      const { data, error } = await sb.from('user_settings').update(prefForm).eq('user_id',user.id).select().single();
+      const { error } = await sb.from('transactions').delete().eq('id', id);
       if (error) throw error;
-      updateSettings(data);
-      document.documentElement.setAttribute('data-font', prefForm.font_choice);
-      if (prefForm.theme==='dark') document.documentElement.classList.add('dark');
-      else if (prefForm.theme==='light') document.documentElement.classList.remove('dark');
-      toast.success('Preferences saved');
-    } catch (e:any) { toast.error(e.message); } finally { setSavingPrefs(false); }
+      removeTransaction(id);
+      toast.success('Deleted');
+    } catch (e: any) { toast.error(e.message); } finally { setDeleting(null); }
   };
-
-  // ---- EXPORT / IMPORT ----
-  const exportAllData = () => {
-    const data = { accounts, categories, owners, income, transactions };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type:'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href=url; a.download='mcs-backup.json'; a.click();
-    toast.success('Data exported as JSON');
-  };
-
-  const TABS = [
-    { id:'accounts', label:'Accounts', icon:Wallet },
-    { id:'categories', label:'Categories', icon:Tag },
-    { id:'owners', label:'Owners', icon:User },
-    { id:'preferences', label:'Preferences', icon:Settings },
-  ] as const;
-
-  const ACC_TYPES = ['Bank Account','Cash Wallet','Credit Card','Savings Bucket','Family / Shared Account','External Holding','Investment / Long-Term Account'];
 
   return (
     <div className="space-y-5">
       <div className="page-header">
         <div>
-          <h1 className="page-title">Master Settings</h1>
-          <p className="text-sm" style={{ color:'var(--text-secondary)' }}>Manage accounts, categories, owners, and app preferences</p>
+          <h1 className="page-title">Transactions</h1>
+          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Daily entries — expenses, transfers, savings, CC payments</p>
         </div>
-        <button onClick={exportAllData} className="btn-md btn-secondary"><Download size={16}/> Export Backup</button>
+        <button onClick={openNew} className="btn-md btn-primary"><Plus size={16} /> Add Transaction</button>
       </div>
 
-      {/* Tab Bar */}
-      <div className="flex gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl w-fit flex-wrap">
-        {TABS.map(({ id, label, icon:Icon }) => (
-          <button key={id} onClick={() => setTab(id as Tab)} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${tab===id?'bg-white dark:bg-slate-700 shadow-sm text-blue-600 dark:text-blue-400':'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}>
-            <Icon size={14}/> {label}
-          </button>
-        ))}
+      {/* Filters */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <select className="form-select text-sm py-1.5 px-3 w-auto" value={filterMonth} onChange={e => setFilterMonth(+e.target.value)}>
+            {MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+          </select>
+          <select className="form-select text-sm py-1.5 px-3 w-auto" value={filterYear} onChange={e => setFilterYear(+e.target.value)}>
+            {YEARS.map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
+          <select className="form-select text-sm py-1.5 px-3 w-auto" value={filterType} onChange={e => setFilterType(e.target.value as any)}>
+            <option value="all">All Types</option>
+            {TRANSACTION_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+          </select>
+        </div>
+        <div className="flex items-center gap-4 text-xs" style={{ color: 'var(--text-muted)' }}>
+          <span>Expense: <strong className="amount-negative">{formatCurrency(totals.expense, sym)}</strong></span>
+          <span>Savings: <strong className="text-blue-600">{formatCurrency(totals.saving, sym)}</strong></span>
+          <span>CC Paid: <strong className="text-amber-600">{formatCurrency(totals.cc_payment, sym)}</strong></span>
+        </div>
       </div>
 
-      {/* ACCOUNTS TAB */}
-      {tab==='accounts' && (
-        <div className="space-y-4">
-          <div className="flex justify-between items-center">
-            <p className="text-sm" style={{ color:'var(--text-secondary)' }}>{accounts.length} accounts · {accounts.filter(a => a.is_active).length} active</p>
-            <button onClick={openNewAcc} className="btn-md btn-primary"><Plus size={16}/> Add Account</button>
-          </div>
-          <div className="card">
-            <div className="table-container border-0">
-              <table className="data-table">
-                <thead><tr><th>Name</th><th>Type</th><th>Dashboard</th><th>Goal Savings</th><th>CC</th><th>Spendable</th><th>Status</th><th className="text-right">Actions</th></tr></thead>
-                <tbody>
-                  {accounts.map(a => (
-                    <tr key={a.id}>
-                      <td className="font-medium text-sm">{a.name}</td>
-                      <td className="text-xs">{a.account_type}</td>
-                      <td>{a.include_in_dashboard?<span className="badge badge-green text-[10px]">Yes</span>:<span className="badge badge-gray text-[10px]">No</span>}</td>
-                      <td>{a.include_in_goal_savings?<span className="badge badge-blue text-[10px]">Yes</span>:<span className="badge badge-gray text-[10px]">No</span>}</td>
-                      <td>{a.is_credit_card?<span className="badge badge-red text-[10px]">Yes</span>:<span className="badge badge-gray text-[10px]">No</span>}</td>
-                      <td>{a.is_spendable?<span className="badge badge-green text-[10px]">Yes</span>:<span className="badge badge-gray text-[10px]">No</span>}</td>
-                      <td>{a.is_active?<span className="badge badge-green text-[10px]">Active</span>:<span className="badge badge-gray text-[10px]">Inactive</span>}</td>
-                      <td>
-                        <div className="flex justify-end gap-1">
-                          <button onClick={() => openEditAcc(a)} className="btn-icon text-slate-400 hover:text-blue-600"><Pencil size={13}/></button>
-                          <button onClick={() => deleteAcc(a)} className="btn-icon text-slate-400 hover:text-red-600"><Trash2 size={13}/></button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+      {/* Form Modal */}
+      {showForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'var(--bg-overlay)' }}>
+          <div className="card w-full max-w-2xl max-h-[92vh] overflow-y-auto animate-fade-in-up">
+            <div className="flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-700">
+              <h2 className="text-lg font-semibold">{editing ? 'Edit Transaction' : 'Add Transaction'}</h2>
+              <button onClick={() => setShowForm(false)} className="btn-icon"><X size={18} /></button>
             </div>
-          </div>
-          {showAccForm && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background:'var(--bg-overlay)' }}>
-              <div className="card w-full max-w-md animate-fade-in-up">
-                <div className="flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-700">
-                  <h2 className="text-lg font-semibold">{editingAcc?'Edit Account':'Add Account'}</h2>
-                  <button onClick={() => setShowAccForm(false)} className="btn-icon"><X size={18}/></button>
-                </div>
-                <div className="p-5 space-y-4">
-                  <div className="form-group">
-                    <label className="form-label">Account Name *</label>
-                    <input type="text" className="form-input" placeholder="e.g. Main Bank Account" value={accForm.name} onChange={e => setAccForm({...accForm, name:e.target.value})}/>
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Account Type *</label>
-                    <select className="form-select" value={accForm.account_type} onChange={e => setAccForm({...accForm, account_type:e.target.value, is_credit_card:e.target.value==='Credit Card', is_spendable:e.target.value!=='Investment / Long-Term Account'&&e.target.value!=='Savings Bucket' })}>
-                      {ACC_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-                    </select>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    {[
-                      { key:'include_in_dashboard', label:'Show on Dashboard' },
-                      { key:'include_in_goal_savings', label:'Include in Goal Savings' },
-                      { key:'is_credit_card', label:'Is Credit Card' },
-                      { key:'is_spendable', label:'Is Spendable' },
-                      { key:'is_active', label:'Active' },
-                    ].map(f => (
-                      <label key={f.key} className="flex items-center gap-2 cursor-pointer text-sm col-span-1">
-                        <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={(accForm as any)[f.key]} onChange={e => setAccForm({...accForm, [f.key]:e.target.checked})}/>
-                        {f.label}
-                      </label>
-                    ))}
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Notes</label>
-                    <textarea className="form-textarea" rows={2} placeholder="Optional" value={accForm.notes} onChange={e => setAccForm({...accForm, notes:e.target.value})}/>
-                  </div>
-                </div>
-                <div className="p-5 border-t border-slate-100 dark:border-slate-700 flex justify-end gap-3">
-                  <button onClick={() => setShowAccForm(false)} className="btn-md btn-secondary">Cancel</button>
-                  <button onClick={saveAcc} className="btn-md btn-primary"><Check size={16}/> {editingAcc?'Update':'Add'}</button>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* CATEGORIES TAB */}
-      {tab==='categories' && (
-        <div className="space-y-4">
-          <div className="flex justify-between items-center">
-            <p className="text-sm" style={{ color:'var(--text-secondary)' }}>{categories.length} categories · {categories.filter(c => c.is_active).length} active</p>
-            <button onClick={openNewCat} className="btn-md btn-primary"><Plus size={16}/> Add Category</button>
-          </div>
-          <div className="card">
-            <div className="table-container border-0">
-              <table className="data-table">
-                <thead><tr><th>Name</th><th>Type</th><th>In Budget</th><th>Color</th><th>Routes to</th><th>Status</th><th className="text-right">Actions</th></tr></thead>
-                <tbody>
-                  {categories.map(c => (
-                    <tr key={c.id}>
-                      <td className="font-medium text-sm">{c.name}</td>
-                      <td><span className="badge badge-blue text-[10px]">{c.type}</span></td>
-                      <td>{c.include_in_budget?<span className="badge badge-green text-[10px]">Yes</span>:<span className="badge badge-gray text-[10px]">No</span>}</td>
-                      <td><span className="flex items-center gap-1.5 text-xs"><span className="w-3.5 h-3.5 rounded-full border border-slate-200" style={{ background:c.color }}/>{c.color}</span></td>
-                      <td className="text-xs">{accounts.find(a => a.id === c.default_account_id)?.name ?? '—'}</td>
-                      <td>{c.is_active?<span className="badge badge-green text-[10px]">Active</span>:<span className="badge badge-gray text-[10px]">Inactive</span>}</td>
-                      <td>
-                        <div className="flex justify-end gap-1">
-                          <button onClick={() => openEditCat(c)} className="btn-icon text-slate-400 hover:text-blue-600"><Pencil size={13}/></button>
-                          <button onClick={() => deleteCat(c)} className="btn-icon text-slate-400 hover:text-red-600"><Trash2 size={13}/></button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-          {showCatForm && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background:'var(--bg-overlay)' }}>
-              <div className="card w-full max-w-md animate-fade-in-up">
-                <div className="flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-700">
-                  <h2 className="text-lg font-semibold">{editingCat?'Edit Category':'Add Category'}</h2>
-                  <button onClick={() => setShowCatForm(false)} className="btn-icon"><X size={18}/></button>
-                </div>
-                <div className="p-5 space-y-4">
-                  <div className="form-group"><label className="form-label">Name *</label><input type="text" className="form-input" placeholder="Category name" value={catForm.name} onChange={e => setCatForm({...catForm, name:e.target.value})}/></div>
-                  <div className="form-group">
-                    <label className="form-label">Type *</label>
-                    <select className="form-select" value={catForm.type} onChange={e => setCatForm({...catForm, type:e.target.value as Category['type']})}>
-                      {['income','expense','transfer','saving','all'].map(t => <option key={t} value={t}>{t}</option>)}
-                    </select>
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Default account (optional)</label>
-                    <select className="form-select" value={catForm.default_account_id} onChange={e => setCatForm({...catForm, default_account_id:e.target.value})}>
-                      <option value="">— None —</option>
-                      {accounts.filter(a => a.is_active).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-                    </select>
-                    <p className="form-hint">When you choose this category on a transaction, this account fills in automatically.</p>
-                  </div>
-                  <div className="form-group"><label className="form-label">Color</label><input type="color" className="form-input h-10" value={catForm.color} onChange={e => setCatForm({...catForm, color:e.target.value})}/></div>
-                  <label className="flex items-center gap-2 cursor-pointer text-sm"><input type="checkbox" className="w-4 h-4 accent-blue-600" checked={catForm.include_in_budget} onChange={e => setCatForm({...catForm, include_in_budget:e.target.checked})}/>Include in Budget</label>
-                  <label className="flex items-center gap-2 cursor-pointer text-sm"><input type="checkbox" className="w-4 h-4 accent-blue-600" checked={catForm.is_active} onChange={e => setCatForm({...catForm, is_active:e.target.checked})}/>Active</label>
-                </div>
-                <div className="p-5 border-t border-slate-100 dark:border-slate-700 flex justify-end gap-3">
-                  <button onClick={() => setShowCatForm(false)} className="btn-md btn-secondary">Cancel</button>
-                  <button onClick={saveCat} className="btn-md btn-primary"><Check size={16}/> {editingCat?'Update':'Add'}</button>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* OWNERS TAB */}
-      {tab==='owners' && (
-        <div className="space-y-4">
-          <div className="flex justify-between items-center">
-            <p className="text-sm" style={{ color:'var(--text-secondary)' }}>{owners.length} owners/purposes</p>
-            <button onClick={openNewOwner} className="btn-md btn-primary"><Plus size={16}/> Add Owner</button>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {owners.map(o => (
-              <div key={o.id} className="card card-p flex items-center gap-3 group">
-                <div className="w-9 h-9 rounded-lg flex-shrink-0 flex items-center justify-center" style={{ background:o.color+'20', color:o.color }}>
-                  <User size={16}/>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-sm">{o.name}</p>
-                  {o.description && <p className="text-xs truncate" style={{ color:'var(--text-muted)' }}>{o.description}</p>}
-                  {!o.is_active && <span className="badge badge-gray text-[10px]">Inactive</span>}
-                </div>
-                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button onClick={() => openEditOwner(o)} className="btn-icon text-slate-400 hover:text-blue-600"><Pencil size={13}/></button>
-                </div>
-              </div>
-            ))}
-          </div>
-          {showOwnerForm && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background:'var(--bg-overlay)' }}>
-              <div className="card w-full max-w-md animate-fade-in-up">
-                <div className="flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-700">
-                  <h2 className="text-lg font-semibold">{editingOwner?'Edit Owner':'Add Owner'}</h2>
-                  <button onClick={() => setShowOwnerForm(false)} className="btn-icon"><X size={18}/></button>
-                </div>
-                <div className="p-5 space-y-4">
-                  <div className="form-group"><label className="form-label">Name *</label><input type="text" className="form-input" placeholder="e.g. Business" value={ownerForm.name} onChange={e => setOwnerForm({...ownerForm, name:e.target.value})}/></div>
-                  <div className="form-group"><label className="form-label">Description</label><input type="text" className="form-input" placeholder="Optional description" value={ownerForm.description} onChange={e => setOwnerForm({...ownerForm, description:e.target.value})}/></div>
-                  <div className="form-group"><label className="form-label">Color</label><input type="color" className="form-input h-10" value={ownerForm.color} onChange={e => setOwnerForm({...ownerForm, color:e.target.value})}/></div>
-                  <label className="flex items-center gap-2 cursor-pointer text-sm"><input type="checkbox" className="w-4 h-4 accent-blue-600" checked={ownerForm.is_active} onChange={e => setOwnerForm({...ownerForm, is_active:e.target.checked})}/>Active</label>
-                </div>
-                <div className="p-5 border-t border-slate-100 dark:border-slate-700 flex justify-end gap-3">
-                  <button onClick={() => setShowOwnerForm(false)} className="btn-md btn-secondary">Cancel</button>
-                  <button onClick={saveOwner} className="btn-md btn-primary"><Check size={16}/> {editingOwner?'Update':'Add'}</button>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* PREFERENCES TAB */}
-      {tab==='preferences' && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className="card card-p space-y-5">
-            <h3 className="section-title text-base">Appearance</h3>
-            <div className="form-group">
-              <label className="form-label">Theme</label>
-              <select className="form-select" value={prefForm.theme} onChange={e => setPrefForm({...prefForm, theme:e.target.value as any})}>
-                <option value="light">☀️ Light</option>
-                <option value="dark">🌙 Dark</option>
-                <option value="system">💻 System</option>
-              </select>
-            </div>
-            <div className="form-group">
-              <label className="form-label">Font</label>
-              <select className="form-select" value={prefForm.font_choice} onChange={e => setPrefForm({...prefForm, font_choice:e.target.value as any})}>
-                <option value="dm-sans">DM Sans (Default)</option>
-                <option value="nunito">Nunito (Rounded)</option>
-                <option value="outfit">Outfit (Modern)</option>
-                <option value="poppins">Poppins (Clean)</option>
-                <option value="inter">Inter (Technical)</option>
-              </select>
-            </div>
-            <h3 className="section-title text-base pt-2 border-t border-slate-100 dark:border-slate-700">Currency</h3>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="p-5 space-y-4">
+              {/* Type selector */}
               <div className="form-group">
-                <label className="form-label">Currency Code</label>
-                <select className="form-select" value={prefForm.currency} onChange={e => { const map: Record<string,string> = { INR:'₹', USD:'$', EUR:'€', GBP:'£', JPY:'¥', AED:'د.إ', SGD:'S$' }; setPrefForm({...prefForm, currency:e.target.value, currency_symbol:map[e.target.value]??'₹'}); }}>
-                  <option value="INR">INR — Indian Rupee</option>
-                  <option value="USD">USD — US Dollar</option>
-                  <option value="EUR">EUR — Euro</option>
-                  <option value="GBP">GBP — British Pound</option>
-                  <option value="JPY">JPY — Japanese Yen</option>
-                  <option value="AED">AED — UAE Dirham</option>
-                  <option value="SGD">SGD — Singapore Dollar</option>
-                </select>
+                <label className="form-label">Transaction Type *</label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {TRANSACTION_TYPES.map(t => (
+                    <button
+                      key={t.value}
+                      type="button"
+                      onClick={() => setForm({ ...form, type: t.value, from_account_id: '', to_account_id: '', category: '', owner_purpose: 'Personal' })}
+                      className={`px-3 py-2 rounded-lg text-xs font-medium border transition-all ${form.type === t.value ? 'bg-blue-600 text-white border-blue-600' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:border-blue-300'}`}
+                    >{t.label}</button>
+                  ))}
+                </div>
+                {/* Helper text */}
+                <p className="form-hint mt-1">
+                  {form.type === 'expense' && 'Records money spent. Debits the From Account.'}
+                  {form.type === 'transfer' && 'Moves money between accounts (e.g. cash withdrawal). No expense counted.'}
+                  {form.type === 'credit_card_payment' && 'Pay a credit card bill. Bank decreases, CC outstanding decreases.'}
+                  {form.type === 'saving' && 'Move money to savings. Source decreases, savings increases.'}
+                  {form.type === 'initial_balance' && 'Set opening balance for a normal account.'}
+                  {form.type === 'initial_cc_outstanding' && 'Set existing credit card balance (what you already owe).'}
+                  {form.type === 'adjustment' && 'Manual balance correction.'}
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="form-group">
+                  <label className="form-label">Date *</label>
+                  <input type="date" className="form-input" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Amount *</label>
+                  <input type="number" className="form-input" placeholder="0.00" value={form.amount || ''} onChange={e => setForm({ ...form, amount: +e.target.value })} min="0.01" step="0.01" />
+                </div>
+              </div>
+
+              {cfg.needsFrom && (
+                <div className="form-group">
+                  <label className="form-label">{cfg.fromLabel ?? 'From Account'} *</label>
+                  <select className="form-select" value={form.from_account_id} onChange={e => setForm({ ...form, from_account_id: e.target.value })}>
+                    <option value="">Select account…</option>
+                    {getFromAccounts().map(a => <option key={a.id} value={a.id}>{a.name}{a.is_credit_card ? ' (CC)' : ''}</option>)}
+                  </select>
+                </div>
+              )}
+
+              {cfg.needsTo && (
+                <div className="form-group">
+                  <label className="form-label">{cfg.toLabel ?? 'To Account'} *</label>
+                  <select className="form-select" value={form.to_account_id} onChange={e => setForm({ ...form, to_account_id: e.target.value })}>
+                    <option value="">Select account…</option>
+                    {getToAccounts().map(a => <option key={a.id} value={a.id}>{a.name}{a.is_credit_card ? ' (CC)' : ''}</option>)}
+                  </select>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-4">
+                {cfg.needsCat && (
+                  <div className="form-group">
+                    <label className="form-label">Category</label>
+                    <select className="form-select" value={form.category} onChange={e => {
+                      const catName = e.target.value;
+                      setForm(f => {
+                        const next = { ...f, category: catName };
+                        const def = defaultFromForCategory(catName);
+                        if (def && getTypeConfig(f.type).needsFrom) next.from_account_id = def;
+                        return next;
+                      });
+                    }}>
+                      <option value="">Select…</option>
+                      {expenseCategories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                    </select>
+                  </div>
+                )}
+                {cfg.needsOwner && (
+                  <div className="form-group">
+                    <label className="form-label">Owner / Purpose</label>
+                    <select className="form-select" value={form.owner_purpose} onChange={e => setForm({ ...form, owner_purpose: e.target.value })}>
+                      {activeOwners.map(o => <option key={o.id} value={o.name}>{o.name}</option>)}
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Description</label>
+                <input type="text" className="form-input" placeholder="What was this for?" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} />
               </div>
               <div className="form-group">
-                <label className="form-label">Symbol Preview</label>
-                <input type="text" className="form-input" value={`${prefForm.currency_symbol}1,00,000`} readOnly/>
+                <label className="form-label">Notes</label>
+                <textarea className="form-textarea" placeholder="Optional notes…" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} rows={2} />
               </div>
             </div>
-            <div className="form-group">
-              <label className="form-label">Safe-to-Spend Buffer ({prefForm.currency_symbol})</label>
-              <input type="number" className="form-input" value={prefForm.safe_spend_buffer} onChange={e => setPrefForm({...prefForm, safe_spend_buffer:+e.target.value})} min="0" step="1000"/>
-              <p className="form-hint">Amount reserved from spendable balance as emergency buffer</p>
-            </div>
-            <h3 className="section-title text-base pt-2 border-t border-slate-100 dark:border-slate-700">Automation</h3>
-            <label className="flex items-start gap-2 cursor-pointer text-sm">
-              <input type="checkbox" className="w-4 h-4 mt-0.5 accent-blue-600" checked={prefForm.sweep_enabled} onChange={e => setPrefForm({...prefForm, sweep_enabled:e.target.checked})}/>
-              <span>
-                Auto-sweep leftover into savings on payday
-                <span className="block text-xs mt-0.5" style={{ color:'var(--text-muted)' }}>When you add a salary for the current month, move whatever is left in that account into your savings bucket so it resets to just the new salary. You&apos;ll be asked to confirm each time.</span>
-              </span>
-            </label>
-            <button onClick={savePrefs} disabled={savingPrefs} className="btn-md btn-primary w-full mt-2">
-              {savingPrefs ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/> : <Check size={16}/>}
-              {savingPrefs ? 'Saving…' : 'Save Preferences'}
-            </button>
-          </div>
-
-          <div className="card card-p space-y-4">
-            <h3 className="section-title text-base">Data Management</h3>
-            <div className="space-y-3">
-              <button onClick={exportAllData} className="btn-md btn-secondary w-full justify-start gap-3"><Download size={16}/>Export All Data (JSON backup)</button>
-              <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-lg text-sm space-y-1">
-                <p className="font-medium">Data Statistics</p>
-                <p style={{ color:'var(--text-muted)' }}>{income.length} income entries</p>
-                <p style={{ color:'var(--text-muted)' }}>{transactions.length} transactions</p>
-                <p style={{ color:'var(--text-muted)' }}>{accounts.length} accounts</p>
-                <p style={{ color:'var(--text-muted)' }}>{categories.length} categories</p>
-              </div>
-              <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-sm">
-                <p className="font-medium text-blue-800 dark:text-blue-300 mb-1">Data Safety</p>
-                <p style={{ color:'var(--text-secondary)' }}>All data is synced to your private Supabase database. Deactivating accounts or categories never deletes historical data — old transactions remain intact.</p>
-              </div>
+            <div className="p-5 border-t border-slate-100 dark:border-slate-700 flex justify-end gap-3">
+              <button onClick={() => setShowForm(false)} className="btn-md btn-secondary">Cancel</button>
+              <button onClick={handleSave} disabled={saving} className="btn-md btn-primary">
+                {saving ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Check size={16} />}
+                {saving ? 'Saving…' : editing ? 'Update' : 'Add'}
+              </button>
             </div>
           </div>
         </div>
       )}
+
+      {/* Table */}
+      <div className="card">
+        <div className="table-container border-0">
+          <table className="data-table">
+            <thead><tr>
+              <th>Date</th><th>Description</th><th>Type</th><th>Category</th><th>Owner</th><th>From</th><th>To</th><th className="text-right">Amount</th><th className="text-right">Actions</th>
+            </tr></thead>
+            <tbody>
+              {filtered.length === 0 && (
+                <tr><td colSpan={9} className="text-center py-10 text-sm" style={{ color: 'var(--text-muted)' }}>
+                  No transactions for this period. Click "Add Transaction" to start.
+                </td></tr>
+              )}
+              {filtered.map(tx => {
+                const fromAcc = accounts.find(a => a.id === tx.from_account_id);
+                const toAcc = accounts.find(a => a.id === tx.to_account_id);
+                return (
+                  <tr key={tx.id}>
+                    <td className="text-xs whitespace-nowrap" style={{ color: 'var(--text-muted)' }}>{tx.date}</td>
+                    <td className="max-w-xs text-sm">{tx.description || tx.category || '—'}</td>
+                    <td><span className={`badge text-[10px] ${TYPE_COLOR[tx.type]}`}>{tx.type.replace(/_/g, ' ')}</span></td>
+                    <td className="text-xs">{tx.category ?? '—'}</td>
+                    <td className="text-xs">{tx.owner_purpose ?? '—'}</td>
+                    <td className="text-xs" style={{ color: 'var(--text-secondary)' }}>{fromAcc?.name ?? '—'}</td>
+                    <td className="text-xs" style={{ color: 'var(--text-secondary)' }}>{toAcc?.name ?? '—'}</td>
+                    <td className={`text-right font-semibold text-sm ${tx.type === 'expense' ? 'amount-negative' : tx.type === 'saving' ? 'text-blue-600 dark:text-blue-400' : 'amount-neutral'}`}>
+                      {tx.type === 'expense' ? '-' : ''}{formatCurrency(tx.amount, sym)}
+                    </td>
+                    <td>
+                      <div className="flex items-center justify-end gap-1">
+                        <button onClick={() => openEdit(tx)} className="btn-icon text-slate-400 hover:text-blue-600"><Pencil size={14} /></button>
+                        <button onClick={() => handleDelete(tx.id)} disabled={deleting === tx.id} className="btn-icon text-slate-400 hover:text-red-600">
+                          {deleting === tx.id ? <span className="w-3.5 h-3.5 border-2 border-red-300 border-t-red-600 rounded-full animate-spin" /> : <Trash2 size={14} />}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }
