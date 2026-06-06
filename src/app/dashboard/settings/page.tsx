@@ -64,10 +64,10 @@ export default function SettingsPage() {
   // ---- CATEGORIES ----
   const [showCatForm, setShowCatForm] = useState(false);
   const [editingCat, setEditingCat] = useState<Category|null>(null);
-  const [catForm, setCatForm] = useState({ name:'', type:'expense' as Category['type'], include_in_budget:true, color:'#3b82f6', is_active:true });
+  const [catForm, setCatForm] = useState({ name:'', type:'expense' as Category['type'], include_in_budget:true, color:'#3b82f6', is_active:true, default_account_id:'' });
 
-  const openNewCat = () => { setEditingCat(null); setCatForm({ name:'', type:'expense', include_in_budget:true, color:'#3b82f6', is_active:true }); setShowCatForm(true); };
-  const openEditCat = (c: Category) => { setEditingCat(c); setCatForm({ name:c.name, type:c.type, include_in_budget:c.include_in_budget, color:c.color, is_active:c.is_active }); setShowCatForm(true); };
+  const openNewCat = () => { setEditingCat(null); setCatForm({ name:'', type:'expense', include_in_budget:true, color:'#3b82f6', is_active:true, default_account_id:'' }); setShowCatForm(true); };
+  const openEditCat = (c: Category) => { setEditingCat(c); setCatForm({ name:c.name, type:c.type, include_in_budget:c.include_in_budget, color:c.color, is_active:c.is_active, default_account_id:c.default_account_id ?? '' }); setShowCatForm(true); };
 
   const hasCatTransactions = (name: string) => transactions.some(t => t.category===name) || income.some(i => i.category===name);
 
@@ -76,7 +76,7 @@ export default function SettingsPage() {
     try {
       const { data: { user } } = await sb.auth.getUser();
       if (!user) return;
-      const payload = { ...catForm, user_id:user.id, icon:'tag' };
+      const payload = { ...catForm, user_id:user.id, icon:'tag', default_account_id: catForm.default_account_id || null };
       if (editingCat) {
         const { data, error } = await sb.from('categories').update(payload).eq('id',editingCat.id).select().single();
         if (error) throw error;
@@ -280,7 +280,7 @@ export default function SettingsPage() {
           <div className="card">
             <div className="table-container border-0">
               <table className="data-table">
-                <thead><tr><th>Name</th><th>Type</th><th>In Budget</th><th>Color</th><th>Status</th><th className="text-right">Actions</th></tr></thead>
+                <thead><tr><th>Name</th><th>Type</th><th>In Budget</th><th>Color</th><th>Routes to</th><th>Status</th><th className="text-right">Actions</th></tr></thead>
                 <tbody>
                   {categories.map(c => (
                     <tr key={c.id}>
@@ -288,6 +288,7 @@ export default function SettingsPage() {
                       <td><span className="badge badge-blue text-[10px]">{c.type}</span></td>
                       <td>{c.include_in_budget?<span className="badge badge-green text-[10px]">Yes</span>:<span className="badge badge-gray text-[10px]">No</span>}</td>
                       <td><span className="flex items-center gap-1.5 text-xs"><span className="w-3.5 h-3.5 rounded-full border border-slate-200" style={{ background:c.color }}/>{c.color}</span></td>
+                      <td className="text-xs">{accounts.find(a => a.id === c.default_account_id)?.name ?? '—'}</td>
                       <td>{c.is_active?<span className="badge badge-green text-[10px]">Active</span>:<span className="badge badge-gray text-[10px]">Inactive</span>}</td>
                       <td>
                         <div className="flex justify-end gap-1">
@@ -315,6 +316,14 @@ export default function SettingsPage() {
                     <select className="form-select" value={catForm.type} onChange={e => setCatForm({...catForm, type:e.target.value as Category['type']})}>
                       {['income','expense','transfer','saving','all'].map(t => <option key={t} value={t}>{t}</option>)}
                     </select>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Default account (optional)</label>
+                    <select className="form-select" value={catForm.default_account_id} onChange={e => setCatForm({...catForm, default_account_id:e.target.value})}>
+                      <option value="">— None —</option>
+                      {accounts.filter(a => a.is_active).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                    </select>
+                    <p className="form-hint">When you choose this category on a transaction, this account fills in automatically.</p>
                   </div>
                   <div className="form-group"><label className="form-label">Color</label><input type="color" className="form-input h-10" value={catForm.color} onChange={e => setCatForm({...catForm, color:e.target.value})}/></div>
                   <label className="flex items-center gap-2 cursor-pointer text-sm"><input type="checkbox" className="w-4 h-4 accent-blue-600" checked={catForm.include_in_budget} onChange={e => setCatForm({...catForm, include_in_budget:e.target.checked})}/>Include in Budget</label>
