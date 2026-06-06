@@ -87,7 +87,7 @@ export default function IncomePage() {
           (t.date || '').slice(0, 7) === incomePeriod
         );
         let leftover = 0;
-        if (isSalary && incomePeriod === nowPeriod && savings && savings.id !== payload.to_account_id && !alreadySwept) {
+        if (settings?.sweep_enabled !== false && isSalary && incomePeriod === nowPeriod && savings && savings.id !== payload.to_account_id && !alreadySwept) {
           const balsBefore = calculateAccountBalances(accounts, income, transactions);
           leftover = Math.round(balsBefore.find(b => b.account.id === payload.to_account_id)?.balance ?? 0);
         }
