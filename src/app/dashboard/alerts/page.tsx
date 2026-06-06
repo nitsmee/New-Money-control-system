@@ -1,7 +1,7 @@
 'use client';
 import { useMemo } from 'react';
 import { useAppStore } from '@/lib/store/appStore';
-import { calculateAccountBalances, calculateBudgetStatus, generateAlerts, formatCurrency } from '@/lib/utils/calculations';
+import { calculateAccountBalances, calculateBudgetStatus, calculateDashboardKPIs, generateAlerts, formatCurrency, safeDueDate } from '@/lib/utils/calculations';
 import { AlertTriangle, CheckCircle, Info, XCircle, Bell, TrendingDown, CreditCard, Calendar, Shield } from 'lucide-react';
 import Link from 'next/link';
 
@@ -26,6 +26,8 @@ export default function AlertsPage() {
   const balances = useMemo(() => calculateAccountBalances(accounts, income, transactions), [accounts, income, transactions]);
   const budgetStatuses = useMemo(() => calculateBudgetStatus(budgets, transactions, income, fixedExpenses, today, today.getMonth()+1, today.getFullYear()), [budgets, transactions, income, fixedExpenses]);
   const alerts = useMemo(() => generateAlerts(budgetStatuses, balances, fixedExpenses, settings ?? { safe_spend_buffer:5000 } as any), [budgetStatuses, balances, fixedExpenses, settings]);
+  // Same engine the dashboard uses — guarantees the Safe-to-Spend number here matches it.
+  const kpis = useMemo(() => calculateDashboardKPIs(accounts, income, transactions, fixedExpenses, { view: 'monthly', month: today.getMonth()+1, year: today.getFullYear() }, settings ?? { safe_spend_buffer:5000 } as any), [accounts, income, transactions, fixedExpenses, settings]);
 
   // Additional computed alerts
   const extraAlerts = useMemo(() => {
@@ -43,28 +45,28 @@ export default function AlertsPage() {
       extra.push({ id:'no-tx-month', type:'missing_data', title:'No Transactions This Month', message:`You have no transactions recorded for ${today.toLocaleString('default',{month:'long'})} ${today.getFullYear()}. Remember to log your daily expenses.`, severity:'info' as const, actionable:true, action_label:'Add Transaction', action_link:'/dashboard/transactions' });
     }
 
-    // Safe-to-spend very low
-    const totalCC = balances.filter(b => b.is_credit_card).reduce((s,b) => s+(b.outstanding??0), 0);
-    const spendable = balances.filter(b => !b.is_credit_card && b.account.is_spendable && b.account.is_active).reduce((s,b) => s+b.balance, 0);
-    const upcomingFixed = fixedExpenses.filter(fe => fe.is_active).reduce((s,fe) => s+fe.amount, 0);
-    const buffer = settings?.safe_spend_buffer ?? 5000;
-    const safeSpend = spendable - upcomingFixed - totalCC - buffer;
+    // Safe-to-spend — read from the same engine as the dashboard so the two
+    // always agree (correct spendable, bank-paid bills only, no card double-count).
+    const safeSpend = kpis.safe_to_spend;
     if (safeSpend < 0) {
       extra.push({ id:'safe-spend-negative', type:'low_safe_spend', title:'Safe-to-Spend is Negative', message:`After upcoming bills, CC dues, and buffer, your safe-to-spend is ${formatCurrency(safeSpend, sym)}. Review your upcoming payments.`, severity:'error' as const, actionable:true, action_label:'View Dashboard', action_link:'/dashboard' });
     } else if (safeSpend < 5000) {
       extra.push({ id:'safe-spend-low', type:'low_safe_spend', title:'Safe-to-Spend is Low', message:`Safe-to-spend is ${formatCurrency(safeSpend, sym)}. Be cautious with discretionary spending.`, severity:'warning' as const, actionable:false });
     }
 
-    // Unprocessed fixed expenses (auto_count=true, not processed this month)
+    // Unprocessed fixed expenses (auto_count=true, due by today but not yet
+    // posted this month). Clamp the due day to the real month length so
+    // month-end bills (29–31) aren't mis-dated.
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
     fixedExpenses.filter(fe => fe.is_active && fe.auto_count && fe.last_processed_period !== thisMonth).forEach(fe => {
-      const dueDate = new Date(today.getFullYear(), today.getMonth(), fe.due_day);
-      if (dueDate <= today) {
+      const occStr = safeDueDate(fe.due_day, today.getFullYear(), today.getMonth());
+      if (occStr <= todayStr) {
         extra.push({ id:`unprocessed-${fe.id}`, type:'unprocessed_fixed', title:`Unprocessed Auto-Payment: ${fe.name}`, message:`"${fe.name}" (${formatCurrency(fe.amount, sym)}) was due on the ${fe.due_day}th but hasn't been auto-processed yet.`, severity:'warning' as const, actionable:true, action_label:'Fixed Expenses', action_link:'/dashboard/fixed-expenses' });
       }
     });
 
     return extra;
-  }, [balances, transactions, fixedExpenses, settings, sym, today]);
+  }, [balances, transactions, fixedExpenses, settings, sym, today, kpis]);
 
   const allAlerts = [...alerts, ...extraAlerts];
   const errors = allAlerts.filter(a => a.severity === 'error');
