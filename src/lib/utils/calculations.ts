@@ -160,12 +160,14 @@ export function calculateDashboardKPIs(
 
   // Account balance totals
   // Role-based, non-overlapping totals (Group A): each account counts once.
+  // Accounts whose "Show on Dashboard" toggle is off are excluded (Phase 4);
+  // `!== false` means anything not explicitly turned off still counts.
   const spendable_balance = balances
-    .filter(b => b.account.is_active && accountRole(b.account) === 'cash')
+    .filter(b => b.account.is_active && b.account.include_in_dashboard !== false && accountRole(b.account) === 'cash')
     .reduce((s, b) => s + b.balance, 0);
 
   const savings_balance = balances
-    .filter(b => b.account.is_active && accountRole(b.account) === 'savings')
+    .filter(b => b.account.is_active && b.account.include_in_dashboard !== false && accountRole(b.account) === 'savings')
     .reduce((s, b) => s + b.balance, 0);
 
   // "Bank balance" = your own liquid money (cash + savings). Investments
@@ -174,7 +176,7 @@ export function calculateDashboardKPIs(
   const total_bank_balance = spendable_balance + savings_balance;
 
   const total_cc_outstanding = balances
-    .filter(b => b.is_credit_card && b.account.is_active)
+    .filter(b => b.is_credit_card && b.account.is_active && b.account.include_in_dashboard !== false)
     .reduce((s, b) => s + (b.outstanding ?? 0), 0);
 
   // Period income
