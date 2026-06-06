@@ -135,7 +135,7 @@ export default function SettingsPage() {
   };
 
   // ---- PREFERENCES ----
-  const [prefForm, setPrefForm] = useState({ theme: settings?.theme??'light', font_choice: settings?.font_choice??'dm-sans', currency: settings?.currency??'INR', currency_symbol: settings?.currency_symbol??'₹', safe_spend_buffer: settings?.safe_spend_buffer??5000 });
+  const [prefForm, setPrefForm] = useState({ theme: settings?.theme??'light', font_choice: settings?.font_choice??'dm-sans', currency: settings?.currency??'INR', currency_symbol: settings?.currency_symbol??'₹', safe_spend_buffer: settings?.safe_spend_buffer??5000, sweep_enabled: settings?.sweep_enabled ?? true });
   const [savingPrefs, setSavingPrefs] = useState(false);
 
   const savePrefs = async () => {
@@ -424,6 +424,14 @@ export default function SettingsPage() {
               <input type="number" className="form-input" value={prefForm.safe_spend_buffer} onChange={e => setPrefForm({...prefForm, safe_spend_buffer:+e.target.value})} min="0" step="1000"/>
               <p className="form-hint">Amount reserved from spendable balance as emergency buffer</p>
             </div>
+            <h3 className="section-title text-base pt-2 border-t border-slate-100 dark:border-slate-700">Automation</h3>
+            <label className="flex items-start gap-2 cursor-pointer text-sm">
+              <input type="checkbox" className="w-4 h-4 mt-0.5 accent-blue-600" checked={prefForm.sweep_enabled} onChange={e => setPrefForm({...prefForm, sweep_enabled:e.target.checked})}/>
+              <span>
+                Auto-sweep leftover into savings on payday
+                <span className="block text-xs mt-0.5" style={{ color:'var(--text-muted)' }}>When you add a salary for the current month, move whatever is left in that account into your savings bucket so it resets to just the new salary. You&apos;ll be asked to confirm each time.</span>
+              </span>
+            </label>
             <button onClick={savePrefs} disabled={savingPrefs} className="btn-md btn-primary w-full mt-2">
               {savingPrefs ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/> : <Check size={16}/>}
               {savingPrefs ? 'Saving…' : 'Save Preferences'}
