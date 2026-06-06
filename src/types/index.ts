@@ -95,6 +95,7 @@ export interface Category {
   include_in_budget: boolean;
   color: string;
   icon: string;
+  default_account_id?: string;
   is_active: boolean;
   sort_order: number;
   created_at: string;
