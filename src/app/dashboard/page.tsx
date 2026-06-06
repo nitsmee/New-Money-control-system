@@ -85,13 +85,15 @@ export default function DashboardPage() {
 
   const balOf = (id?: string) => balances.find(b => b.account.id === id);
 
-  // Derived figures
+  // Derived figures. `shown` honors each account's "Show on Dashboard" toggle
+  // (Phase 4) — anything not explicitly turned off still appears.
+  const shown = (b: typeof balances[number]) => b.account.is_active && b.account.include_in_dashboard !== false;
   const bankBalances = useMemo(() => balances.filter(b => !b.is_credit_card && b.account.is_active), [balances]);
-  const ccBalances = useMemo(() => balances.filter(b => b.is_credit_card && b.account.is_active), [balances]);
-  const cashBalances = useMemo(() => balances.filter(b => b.account.is_active && accountRole(b.account) === 'cash'), [balances]);
-  const savingsBalances = useMemo(() => balances.filter(b => b.account.is_active && accountRole(b.account) === 'savings'), [balances]);
-  const investBalances = useMemo(() => balances.filter(b => b.account.is_active && accountRole(b.account) === 'investment'), [balances]);
-  const familyBalances = useMemo(() => balances.filter(b => b.account.is_active && accountRole(b.account) === 'family'), [balances]);
+  const ccBalances = useMemo(() => balances.filter(b => b.is_credit_card && shown(b)), [balances]);
+  const cashBalances = useMemo(() => balances.filter(b => shown(b) && accountRole(b.account) === 'cash'), [balances]);
+  const savingsBalances = useMemo(() => balances.filter(b => shown(b) && accountRole(b.account) === 'savings'), [balances]);
+  const investBalances = useMemo(() => balances.filter(b => shown(b) && accountRole(b.account) === 'investment'), [balances]);
+  const familyBalances = useMemo(() => balances.filter(b => shown(b) && accountRole(b.account) === 'family'), [balances]);
   const investTotal = useMemo(() => investBalances.reduce((s, b) => s + b.balance, 0), [investBalances]);
   const familyTotal = useMemo(() => familyBalances.reduce((s, b) => s + b.balance, 0), [familyBalances]);
   const netWorth = (kpis?.spendable_balance ?? 0) + (kpis?.savings_balance ?? 0) + investTotal - (kpis?.total_cc_outstanding ?? 0);
