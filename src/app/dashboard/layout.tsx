@@ -7,12 +7,13 @@ import { useAppStore } from '@/lib/store/appStore';
 import {
   LayoutDashboard, TrendingUp, ArrowLeftRight, Repeat, PieChart, Target,
   BarChart3, Settings, Bell, LogOut, Menu, X, ChevronLeft, Sun, Moon,
-  Monitor, Wallet, FlaskConical
+  Monitor, Wallet, FlaskConical, Landmark
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const NAV = [
   { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+  { label: 'Accounts', href: '/dashboard/accounts', icon: Landmark },
   { label: 'Income', href: '/dashboard/income', icon: TrendingUp },
   { label: 'Transactions', href: '/dashboard/transactions', icon: ArrowLeftRight },
   { label: 'Fixed Expenses', href: '/dashboard/fixed-expenses', icon: Repeat },
