@@ -215,6 +215,7 @@ export interface UserSettings {
   date_format: string;
   month_start_day: number;
   safe_spend_buffer: number;
+  sweep_enabled: boolean;
   dashboard_view: DashboardView;
   selected_month: number;
   selected_year: number;
