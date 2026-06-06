@@ -260,7 +260,7 @@ export default function TestResultsPage() {
     // TEST 18: Budget allowed-till-date (Red status when overspent)
     try {
       const today = new Date();
-      const budgetStatuses = calculateBudgetStatus(budgets, transactions, income, fixedExpenses, today, today.getMonth()+1, today.getFullYear());
+      const budgetStatuses = calculateBudgetStatus(budgets, transactions, fixedExpenses, today, today.getMonth()+1, today.getFullYear());
       if (budgetStatuses.length === 0) {
         results.push(skip(18, 'Budget Allowed Till Date', 'Red when actual > allowed till date', 'No budgets configured.'));
       } else {
@@ -278,7 +278,7 @@ export default function TestResultsPage() {
 
     // TEST 19: Budget back on track (Green when caught up)
     try {
-      const budgetStatuses = calculateBudgetStatus(budgets, transactions, income, fixedExpenses, new Date(), new Date().getMonth()+1, new Date().getFullYear());
+      const budgetStatuses = calculateBudgetStatus(budgets, transactions, fixedExpenses, new Date(), new Date().getMonth()+1, new Date().getFullYear());
       const greenStatuses = budgetStatuses.filter(b => b.status === 'green');
       const correctGreen = greenStatuses.every(b => b.actual_till_date <= b.allowed_till_date && b.actual_till_date <= b.monthly_budget);
       if (correctGreen || greenStatuses.length === 0) {

@@ -24,7 +24,7 @@ export default function AlertsPage() {
   const today = new Date();
 
   const balances = useMemo(() => calculateAccountBalances(accounts, income, transactions), [accounts, income, transactions]);
-  const budgetStatuses = useMemo(() => calculateBudgetStatus(budgets, transactions, income, fixedExpenses, today, today.getMonth()+1, today.getFullYear()), [budgets, transactions, income, fixedExpenses]);
+  const budgetStatuses = useMemo(() => calculateBudgetStatus(budgets, transactions, fixedExpenses, today, today.getMonth()+1, today.getFullYear()), [budgets, transactions, fixedExpenses]);
   const alerts = useMemo(() => generateAlerts(budgetStatuses, balances, fixedExpenses, settings ?? { safe_spend_buffer:5000 } as any), [budgetStatuses, balances, fixedExpenses, settings]);
   // Same engine the dashboard uses — guarantees the Safe-to-Spend number here matches it.
   const kpis = useMemo(() => calculateDashboardKPIs(accounts, income, transactions, fixedExpenses, { view: 'monthly', month: today.getMonth()+1, year: today.getFullYear() }, settings ?? { safe_spend_buffer:5000 } as any), [accounts, income, transactions, fixedExpenses, settings]);

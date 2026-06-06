@@ -4,6 +4,7 @@ import { useAppStore } from '@/lib/store/appStore';
 import { createClient } from '@/lib/supabase/client';
 import { Transaction, TransactionType, TRANSACTION_TYPES } from '@/types';
 import { formatCurrency } from '@/lib/utils/calculations';
+import { format, endOfMonth } from 'date-fns';
 import toast from 'react-hot-toast';
 import { Plus, Pencil, Trash2, X, Check, Filter } from 'lucide-react';
 
@@ -67,7 +68,7 @@ export default function TransactionsPage() {
 
   const filtered = useMemo(() => {
     const start = `${filterYear}-${String(filterMonth).padStart(2, '0')}-01`;
-    const end = `${filterYear}-${String(filterMonth).padStart(2, '0')}-31`;
+    const end = format(endOfMonth(new Date(filterYear, filterMonth - 1)), 'yyyy-MM-dd');
     return transactions
       .filter(t => t.date >= start && t.date <= end && (filterType === 'all' || t.type === filterType))
       .sort((a, b) => b.date.localeCompare(a.date));
@@ -87,7 +88,10 @@ export default function TransactionsPage() {
   };
   const getToAccounts = () => {
     if (form.type === 'credit_card_payment') return ccAccounts;
-    if (form.type === 'saving') return nonCcAccounts;
+    // Transfers and savings should only go to non-CC accounts; sending a
+    // transfer to a credit card is semantically a CC payment and should use
+    // the credit_card_payment type instead to avoid double-counting.
+    if (form.type === 'saving' || form.type === 'transfer') return nonCcAccounts;
     return activeAccounts;
   };
 

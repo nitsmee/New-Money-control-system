@@ -6,7 +6,11 @@ import type { NextRequest } from 'next/server';
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get('code');
-  const next = searchParams.get('next') ?? '/dashboard';
+  // Sanitise the `next` redirect to prevent open-redirect attacks.
+  // Only accept relative paths that start with '/' and don't start with '//'
+  // (which some browsers treat as protocol-relative, i.e. cross-origin).
+  const rawNext = searchParams.get('next') ?? '/dashboard';
+  const next = rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : '/dashboard';
 
   if (code) {
     const cookieStore = cookies();

@@ -1,7 +1,8 @@
 'use client';
 import { useState, useMemo } from 'react';
 import { useAppStore } from '@/lib/store/appStore';
-import { calculateAccountBalances, calculateBudgetStatus, buildMonthlyTrends, getCategorySpend, formatCurrency } from '@/lib/utils/calculations';
+import { calculateAccountBalances, calculateBudgetStatus, buildMonthlyTrends, getCategorySpend, formatCurrency, accountRole } from '@/lib/utils/calculations';
+import { format, endOfMonth } from 'date-fns';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, LineChart, Line, PieChart, Pie, Cell, ResponsiveContainer, AreaChart, Area } from 'recharts';
 import { Download, Calendar, TrendingUp, TrendingDown, Wallet } from 'lucide-react';
 import Papa from 'papaparse';
@@ -21,13 +22,13 @@ export default function ReportsPage() {
   // --- Monthly Data ---
   const monthlyIncome = useMemo(() => {
     const s = `${selYear}-${String(selMonth).padStart(2,'0')}-01`;
-    const e = `${selYear}-${String(selMonth).padStart(2,'0')}-31`;
+    const e = format(endOfMonth(new Date(selYear, selMonth - 1)), 'yyyy-MM-dd');
     return income.filter(i => i.date >= s && i.date <= e);
   }, [income, selMonth, selYear]);
 
   const monthlyTx = useMemo(() => {
     const s = `${selYear}-${String(selMonth).padStart(2,'0')}-01`;
-    const e = `${selYear}-${String(selMonth).padStart(2,'0')}-31`;
+    const e = format(endOfMonth(new Date(selYear, selMonth - 1)), 'yyyy-MM-dd');
     return transactions.filter(t => t.date >= s && t.date <= e);
   }, [transactions, selMonth, selYear]);
 
@@ -36,16 +37,22 @@ export default function ReportsPage() {
     const trueIncome = monthlyIncome.filter(i => i.include_in_true_income).reduce((s,i) => s+i.amount, 0);
     const expenses = monthlyTx.filter(t => t.type==='expense');
     const totalExpense = expenses.reduce((s,t) => s+t.amount, 0);
-    const personalExpense = expenses.filter(t => t.owner_purpose==='Personal').reduce((s,t) => s+t.amount, 0);
-    const familyExpense = expenses.filter(t => ['Family / Home','Family/Home','Shared'].includes(t.owner_purpose??'')).reduce((s,t) => s+t.amount, 0);
+    // Use same family detection logic as calculateDashboardKPIs: account-role first,
+    // then owner_purpose regex fallback — so both pages always show the same split.
+    const familyAcctIds = new Set(accounts.filter(a => accountRole(a) === 'family').map(a => a.id));
+    const isFamilyExpense = (t: typeof expenses[0]) =>
+      (!!t.from_account_id && familyAcctIds.has(t.from_account_id)) ||
+      /family|shared|home|joint/i.test(t.owner_purpose ?? '');
+    const familyExpense = expenses.filter(isFamilyExpense).reduce((s,t) => s+t.amount, 0);
+    const personalExpense = expenses.filter(t => !isFamilyExpense(t)).reduce((s,t) => s+t.amount, 0);
     const totalSavings = monthlyTx.filter(t => t.type==='saving').reduce((s,t) => s+t.amount, 0);
     const ccBillsPaid = monthlyTx.filter(t => t.type==='credit_card_payment').reduce((s,t) => s+t.amount, 0);
     const netCashflow = totalIncome - totalExpense - totalSavings;
     return { totalIncome, trueIncome, totalExpense, personalExpense, familyExpense, totalSavings, ccBillsPaid, netCashflow };
-  }, [monthlyIncome, monthlyTx]);
+  }, [monthlyIncome, monthlyTx, accounts]);
 
   const monthCatSpend = useMemo(() => getCategorySpend(monthlyTx, []), [monthlyTx]);
-  const budgetStatuses = useMemo(() => calculateBudgetStatus(budgets, transactions, income, fixedExpenses, new Date(), selMonth, selYear), [budgets, transactions, income, fixedExpenses, selMonth, selYear]);
+  const budgetStatuses = useMemo(() => calculateBudgetStatus(budgets, transactions, fixedExpenses, new Date(), selMonth, selYear), [budgets, transactions, fixedExpenses, selMonth, selYear]);
   const balances = useMemo(() => calculateAccountBalances(accounts, income, transactions), [accounts, income, transactions]);
 
   // --- Yearly Data ---
@@ -57,9 +64,14 @@ export default function ReportsPage() {
     const totalExpense = expenses.reduce((s,t) => s+t.amount, 0);
     const totalSavings = yearlyTx.filter(t => t.type==='saving').reduce((s,t) => s+t.amount, 0);
     const ccBills = yearlyTx.filter(t => t.type==='credit_card_payment').reduce((s,t) => s+t.amount, 0);
-    const familyExpense = expenses.filter(t => ['Family / Home','Family/Home','Shared'].includes(t.owner_purpose??'')).reduce((s,t) => s+t.amount, 0);
+    // Same account-role + regex logic as calculateDashboardKPIs
+    const familyAcctIds = new Set(accounts.filter(a => accountRole(a) === 'family').map(a => a.id));
+    const familyExpense = expenses.filter(t =>
+      (!!t.from_account_id && familyAcctIds.has(t.from_account_id)) ||
+      /family|shared|home|joint/i.test(t.owner_purpose ?? '')
+    ).reduce((s,t) => s+t.amount, 0);
     return { totalIncome, totalExpense, totalSavings, ccBills, familyExpense };
-  }, [yearlyIncome, yearlyTx]);
+  }, [yearlyIncome, yearlyTx, accounts]);
 
   const trends = useMemo(() => buildMonthlyTrends(income.filter(i => i.date.startsWith(String(selYear))), transactions.filter(t => t.date.startsWith(String(selYear))), 12), [income, transactions, selYear]);
   const yearlyCatSpend = useMemo(() => getCategorySpend(yearlyTx.filter(t => t.type==='expense'), []), [yearlyTx]);

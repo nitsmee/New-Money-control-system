@@ -286,7 +286,6 @@ export function calculateDashboardKPIs(
 export function calculateBudgetStatus(
   budgets: Budget[],
   transactions: Transaction[],
-  income: Income[],
   fixedExpenses: FixedExpense[],
   statusDate: Date,
   month: number,

@@ -27,7 +27,22 @@ export default function GoalsPage() {
   const balances = useMemo(() => calculateAccountBalances(accounts, income, transactions), [accounts, income, transactions]);
   const totalSavings = useMemo(() => balances.filter(b => !b.is_credit_card && b.account.is_active && b.account.include_in_goal_savings).reduce((s,b) => s+b.balance, 0), [balances]);
   const activeGoals = useMemo(() => goals.filter(g => g.is_active).sort((a,b) => a.priority - b.priority), [goals]);
-  const goalAnalyses = useMemo(() => activeGoals.map(g => analyzeGoal(g, totalSavings)), [activeGoals, totalSavings]);
+  const goalAnalyses = useMemo(() => {
+    // Allocate savings pool sequentially by priority so goals don't all
+    // compete against the same full pool — buying goal #1 leaves less for #2.
+    // If a goal has amount_allocated > 0, use that dedicated amount instead
+    // of drawing from the shared pool.
+    let remainingPool = totalSavings;
+    return activeGoals.map(g => {
+      const available = g.amount_allocated > 0 ? g.amount_allocated : remainingPool;
+      const analysis = analyzeGoal(g, available);
+      // Deduct this goal's cost from the shared pool only if it draws from it
+      if (g.amount_allocated <= 0 && analysis.can_buy_now) {
+        remainingPool = Math.max(0, remainingPool - g.expected_cost);
+      }
+      return analysis;
+    });
+  }, [activeGoals, totalSavings]);
 
   const openNew = () => { setEditing(null); setForm({...EMPTY}); setShowForm(true); };
   const openEdit = (g: Goal) => {

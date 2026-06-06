@@ -75,7 +75,7 @@ export default function DashboardPage() {
 
   const balances = useMemo(() => calculateAccountBalances(accounts, income, transactions), [accounts, income, transactions]);
   const kpis = useMemo(() => settings ? calculateDashboardKPIs(accounts, income, transactions, fixedExpenses, filter, settings) : null, [accounts, income, transactions, fixedExpenses, filter, settings]);
-  const budgetStatus = useMemo(() => calculateBudgetStatus(budgets, transactions, income, fixedExpenses, now, selMonth, selYear), [budgets, transactions, income, fixedExpenses, selMonth, selYear]);
+  const budgetStatus = useMemo(() => calculateBudgetStatus(budgets, transactions, fixedExpenses, now, selMonth, selYear), [budgets, transactions, fixedExpenses, selMonth, selYear]);
   const trends = useMemo(() => buildMonthlyTrends(income, transactions, 12), [income, transactions]);
   const catSpend = useMemo(() => getCategorySpend(
     transactions.filter(t => t.date.startsWith(period)),

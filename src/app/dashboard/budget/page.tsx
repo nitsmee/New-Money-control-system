@@ -4,6 +4,7 @@ import { useAppStore } from '@/lib/store/appStore';
 import { createClient } from '@/lib/supabase/client';
 import { Budget } from '@/types';
 import { calculateBudgetStatus, formatCurrency } from '@/lib/utils/calculations';
+import { getDaysInMonth } from 'date-fns';
 import toast from 'react-hot-toast';
 import { Plus, Pencil, Trash2, X, Check, TrendingUp, AlertTriangle, CheckCircle } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
@@ -32,7 +33,7 @@ export default function BudgetPage() {
   }, [selMonth, selYear, today]);
 
   const budgetStatuses = useMemo(() =>
-    calculateBudgetStatus(budgets, transactions, income, fixedExpenses, statusDate, selMonth, selYear),
+    calculateBudgetStatus(budgets, transactions, fixedExpenses, statusDate, selMonth, selYear),
     [budgets, transactions, income, fixedExpenses, statusDate, selMonth, selYear]
   );
 
@@ -245,7 +246,7 @@ export default function BudgetPage() {
                 <label className="form-label">Monthly Budget Amount *</label>
                 <input type="number" className="form-input" placeholder="0" value={form.monthly_budget || ''} onChange={e => setForm({...form, monthly_budget: +e.target.value})} min="0" step="1" />
                 {form.monthly_budget > 0 && (
-                  <p className="form-hint">Daily budget: {formatCurrency(form.monthly_budget / 30, sym)}/day</p>
+                  <p className="form-hint">Daily budget: {formatCurrency(form.monthly_budget / getDaysInMonth(new Date(selYear, selMonth - 1)), sym)}/day</p>
                 )}
               </div>
               <div className="form-group">
