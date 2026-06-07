@@ -543,6 +543,24 @@ function buildContext(data: BotData, me: UserInfo): string {
 
 interface Message { role: 'user' | 'bot'; text?: string; value?: string; entry?: KBEntry; thinking?: boolean }
 
+// Lightweight inline markdown: **bold** and _italic_. Newlines are preserved
+// by the parent's whitespace-pre-wrap, so the bot's answers read cleanly
+// instead of showing literal ** and _ characters.
+function renderRich(text: string): React.ReactNode[] {
+  const nodes: React.ReactNode[] = [];
+  const regex = /(\*\*[^*\n]+\*\*|_[^_\n]+_)/g;
+  let last = 0; let m: RegExpExecArray | null; let key = 0;
+  while ((m = regex.exec(text)) !== null) {
+    if (m.index > last) nodes.push(text.slice(last, m.index));
+    const tok = m[0];
+    if (tok.startsWith('**')) nodes.push(<strong key={key++}>{tok.slice(2, -2)}</strong>);
+    else nodes.push(<em key={key++}>{tok.slice(1, -1)}</em>);
+    last = regex.lastIndex;
+  }
+  if (last < text.length) nodes.push(text.slice(last));
+  return nodes;
+}
+
 function BotBubble({ msg }: { msg: Message }) {
   return (
     <div className="rounded-xl p-3 text-sm max-w-[92%]" style={{ background: 'var(--bg-subtle, #f1f5f9)', color: 'var(--text-primary)' }}>
@@ -563,7 +581,7 @@ function BotBubble({ msg }: { msg: Message }) {
               {msg.entry.example && <p className="text-xs mt-2 italic" style={{ color: 'var(--text-muted, #94a3b8)' }}>e.g. {msg.entry.example}</p>}
             </>
           ) : (
-            <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
+            <p className="whitespace-pre-wrap leading-relaxed">{renderRich(msg.text || '')}</p>
           )}
         </>
       )}
