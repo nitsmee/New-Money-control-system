@@ -718,6 +718,24 @@ export function currencySymbol(code?: string): string {
   return CURRENCY_SYMBOLS[code.toUpperCase()] ?? `${code.toUpperCase()} `;
 }
 
+// A clean dropdown/label string for a currency. Shows "THB ฿" when there's a
+// distinct symbol, but just "CHF" when the symbol is only the code (avoids the
+// "CHF CHF" double-name).
+export function currencyLabel(code: string): string {
+  const c = (code || '').toUpperCase();
+  const sym = CURRENCY_SYMBOLS[c];
+  return sym && sym.trim() !== c ? `${c} ${sym}` : c;
+}
+
+// Currencies the app can pick from (searchable in the UI).
+export const CURRENCY_CODES = [
+  'INR', 'THB', 'USD', 'EUR', 'GBP', 'JPY', 'AED', 'SGD', 'AUD', 'CAD',
+  'MYR', 'CNY', 'CHF', 'HKD', 'NZD', 'LKR', 'NPR',
+];
+
+// Shared year list for date selectors — runs through 2060.
+export const YEAR_OPTIONS: number[] = Array.from({ length: 2060 - 2023 + 1 }, (_, i) => 2023 + i);
+
 // rates: value of 1 unit of a currency expressed IN the base currency.
 // The base currency itself is implicitly 1.
 export function convertAmount(

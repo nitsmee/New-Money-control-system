@@ -4,7 +4,7 @@ import { useAppStore } from '@/lib/store/appStore';
 import {
   calculateAccountBalances, calculateDashboardKPIs, calculateBudgetStatus,
   buildMonthlyTrends, getCategorySpend, generateAlerts, formatCurrency, formatDate, accountRole, safeDueDate,
-  currencySymbol, normalizeAmounts
+  currencySymbol, currencyLabel, normalizeAmounts, YEAR_OPTIONS
 } from '@/lib/utils/calculations';
 import { useDisplayCurrency } from '@/lib/useDisplayCurrency';
 import { runAutoProcess } from '@/lib/utils/autoProcess';
@@ -20,9 +20,8 @@ import Link from 'next/link';
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-// Rolling year list — always spans 2023 through (this year + 6) and extends itself
-// automatically every year, so the app never gets "stuck" at a hard-coded ceiling.
-const YEARS = Array.from({ length: (new Date().getFullYear() + 6) - 2023 }, (_, i) => 2023 + i);
+// Shared year list for the selector — runs through 2060.
+const YEARS = YEAR_OPTIONS;
 
 // Smooth count-up for the headline numbers.
 function useCountUp(target: number, duration = 650) {
@@ -401,7 +400,7 @@ export default function DashboardPage() {
               title="Display all totals in this currency"
               aria-label="Display currency"
             >
-              {currenciesInUse.map(c => <option key={c} value={c}>{currencySymbol(c)} {c}</option>)}
+              {currenciesInUse.map(c => <option key={c} value={c}>{currencyLabel(c)}</option>)}
             </select>
           )}
           <select className="form-select text-sm py-2 px-3 pr-8 w-auto" value={selMonth} onChange={e => { setSelMonth(+e.target.value); setDateFilter({ ...filter, month: +e.target.value }); }}>

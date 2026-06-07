@@ -1,7 +1,7 @@
 'use client';
 import { useState, useMemo } from 'react';
 import { useAppStore } from '@/lib/store/appStore';
-import { calculateAccountBalances, calculateBudgetStatus, getCategorySpend, formatCurrency, accountRole, currencySymbol, normalizeAmounts } from '@/lib/utils/calculations';
+import { calculateAccountBalances, calculateBudgetStatus, getCategorySpend, formatCurrency, accountRole, currencySymbol, normalizeAmounts, YEAR_OPTIONS } from '@/lib/utils/calculations';
 import { useDisplayCurrency } from '@/lib/useDisplayCurrency';
 import { format, endOfMonth } from 'date-fns';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, LineChart, Line, PieChart, Pie, Cell, ResponsiveContainer, AreaChart, Area } from 'recharts';
@@ -188,7 +188,7 @@ export default function ReportsPage() {
               {MONTHS.map((m,i) => <option key={m} value={i+1}>{m}</option>)}
             </select>
             <select className="form-select text-sm py-1.5 px-3 w-auto" value={selYear} onChange={e => setSelYear(+e.target.value)}>
-              {[2024,2025,2026,2027].map(y => <option key={y} value={y}>{y}</option>)}
+              {YEAR_OPTIONS.map(y => <option key={y} value={y}>{y}</option>)}
             </select>
           </div>
 
@@ -280,7 +280,7 @@ export default function ReportsPage() {
         <div className="space-y-4">
           <div className="flex items-center gap-2">
             <select className="form-select text-sm py-1.5 px-3 w-auto" value={selYear} onChange={e => setSelYear(+e.target.value)}>
-              {[2023,2024,2025,2026,2027].map(y => <option key={y} value={y}>{y}</option>)}
+              {YEAR_OPTIONS.map(y => <option key={y} value={y}>{y}</option>)}
             </select>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">

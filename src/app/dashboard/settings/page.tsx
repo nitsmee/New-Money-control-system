@@ -6,11 +6,10 @@ import { Account, Category, Owner, UserSettings } from '@/types';
 import toast from 'react-hot-toast';
 import { Plus, Pencil, Trash2, X, Check, Settings, Database, User, Tag, Wallet, Download, Upload, RefreshCw, Coins } from 'lucide-react';
 import Papa from 'papaparse';
-import { currencySymbol } from '@/lib/utils/calculations';
+import { currencyLabel, CURRENCY_CODES } from '@/lib/utils/calculations';
+import { CurrencySelect } from '@/components/CurrencySelect';
 
 type Tab = 'accounts'|'categories'|'owners'|'preferences';
-
-const SUPPORTED_CURRENCIES = ['INR','THB','USD','EUR','GBP','JPY','AED','SGD','AUD','CAD','MYR','CNY'];
 
 export default function SettingsPage() {
   const { accounts, categories, owners, settings, addAccount, updateAccount, removeAccount, addCategory, updateCategory, removeCategory, addOwner, updateOwner, removeOwner, updateSettings, transactions, income, budgets, goals, fixedExpenses, recurringIncome } = useAppStore();
@@ -220,7 +219,7 @@ export default function SettingsPage() {
 
   // Currencies from the supported list that aren't already shown — offered in
   // the "Add" dropdown so the user can seed a rate before any account uses it.
-  const addableCurrencies = SUPPORTED_CURRENCIES.filter(
+  const addableCurrencies = CURRENCY_CODES.filter(
     c => c !== baseCurrency && !rateRowCurrencies.includes(c)
   );
 
@@ -358,9 +357,7 @@ export default function SettingsPage() {
                   </div>
                   <div className="form-group">
                     <label className="form-label">Currency</label>
-                    <select className="form-select" value={accForm.currency} onChange={e => setAccForm({...accForm, currency:e.target.value})}>
-                      {SUPPORTED_CURRENCIES.map(c => <option key={c} value={c}>{c} — {currencySymbol(c)}</option>)}
-                    </select>
+                    <CurrencySelect value={accForm.currency} onChange={v => setAccForm({ ...accForm, currency: v })} options={CURRENCY_CODES} />
                     <p className="form-hint">Balances in this account are held in this currency.</p>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
@@ -616,7 +613,7 @@ export default function SettingsPage() {
               <h3 className="section-title text-base">Currencies &amp; Exchange Rates</h3>
             </div>
             <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-lg text-sm">
-              <p><span className="font-medium">Base:</span> {baseCurrency} {currencySymbol(baseCurrency)} — everything converts to/from this.</p>
+              <p><span className="font-medium">Base:</span> {currencyLabel(baseCurrency)} — everything converts to/from this.</p>
               <p className="form-hint mt-1">Each rate below is the value of 1 unit of that currency in {baseCurrency}.</p>
             </div>
 
@@ -639,7 +636,7 @@ export default function SettingsPage() {
                   <tbody>
                     {rateRowCurrencies.map(ccy => (
                       <tr key={ccy}>
-                        <td className="font-medium text-sm whitespace-nowrap">{ccy} {currencySymbol(ccy)}</td>
+                        <td className="font-medium text-sm whitespace-nowrap">{currencyLabel(ccy)}</td>
                         <td>
                           <div className="flex items-center gap-2">
                             <span className="text-xs whitespace-nowrap" style={{ color:'var(--text-muted)' }}>1 {ccy} =</span>
@@ -655,10 +652,7 @@ export default function SettingsPage() {
             )}
 
             <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-slate-100 dark:border-slate-700">
-              <select className="form-select w-auto" value={addCcy} onChange={e => setAddCcy(e.target.value)} disabled={addableCurrencies.length === 0}>
-                <option value="">{addableCurrencies.length === 0 ? 'All currencies added' : '— Add a currency —'}</option>
-                {addableCurrencies.map(c => <option key={c} value={c}>{c} — {currencySymbol(c)}</option>)}
-              </select>
+              <CurrencySelect value={addCcy} onChange={setAddCcy} options={addableCurrencies} placeholder="Add currency" />
               <button onClick={addCurrencyRow} disabled={!addCcy} className="btn-md btn-secondary gap-2"><Plus size={16}/> Add</button>
               <button onClick={saveRates} disabled={savingRates} className="btn-md btn-primary gap-2 ml-auto">
                 {savingRates ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/> : <Check size={16}/>}

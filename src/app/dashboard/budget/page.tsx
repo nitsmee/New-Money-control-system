@@ -3,7 +3,7 @@ import { useState, useMemo } from 'react';
 import { useAppStore } from '@/lib/store/appStore';
 import { createClient } from '@/lib/supabase/client';
 import { Budget } from '@/types';
-import { calculateBudgetStatus, formatCurrency, currencySymbol, convertAmount, normalizeAmounts } from '@/lib/utils/calculations';
+import { calculateBudgetStatus, formatCurrency, currencySymbol, convertAmount, normalizeAmounts, YEAR_OPTIONS } from '@/lib/utils/calculations';
 import { useDisplayCurrency } from '@/lib/useDisplayCurrency';
 import { getDaysInMonth } from 'date-fns';
 import toast from 'react-hot-toast';
@@ -142,7 +142,7 @@ export default function BudgetPage() {
             {MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
           </select>
           <select className="form-select text-sm py-1.5 px-3 w-auto" value={selYear} onChange={e => setSelYear(+e.target.value)}>
-            {[2024,2025,2026,2027].map(y => <option key={y} value={y}>{y}</option>)}
+            {YEAR_OPTIONS.map(y => <option key={y} value={y}>{y}</option>)}
           </select>
           <button onClick={openNew} className="btn-md btn-primary"><Plus size={16}/> Add Budget</button>
         </div>
