@@ -1,6 +1,7 @@
 'use client';
 import { useState, useRef, useEffect, useMemo } from 'react';
-import { Bot, X, Send, Sparkles } from 'lucide-react';
+import { Bot, X, Send, Sparkles, EyeOff } from 'lucide-react';
+import toast from 'react-hot-toast';
 import {
   format, startOfMonth, endOfMonth, startOfWeek, endOfWeek,
   subDays, subMonths, subWeeks, subYears, startOfYear, endOfYear,
@@ -352,7 +353,7 @@ function topCutTip(data: BotData, fc: (n: number) => string): string {
 }
 
 function answerAffordability(q: string, data: BotData): string | null {
-  if (!/\b(can i (afford|buy|get|purchase|take)|able to (buy|afford)|should i buy|do i have enough)\b/.test(q)) return null;
+  if (!/\b(afford|can i (buy|get|purchase|take)|should i (buy|get)|do i have enough|enough (money|savings)|want to buy|planning to buy|thinking of buying|save up for)\b/.test(q)) return null;
   const sym = data.settings?.currency_symbol ?? '₹';
   const fc = (n: number) => formatCurrency(n, sym);
 
@@ -390,6 +391,24 @@ function answerAffordability(q: string, data: BotData): string | null {
   const when = format(addMonths(new Date(), months), 'MMMM yyyy');
   const faster = Math.ceil(gap / (monthlyCapacity * 1.5));
   return `🟡 **Not right now — but it's within reach.** ${cap(label)} costs ${fc(price)}; you have ${fc(pool)} (short by ${fc(gap)}).\n\n• Your saving capacity: ~${fc(monthlyCapacity)}/month\n• At that pace: **~${months} month${months === 1 ? '' : 's'}** → around ${when}\n\n**How to manage it:**\n• Save ${fc(monthlyCapacity)}/month consistently${topCutTip(data, fc)}\n• Push savings to ${fc(Math.round(monthlyCapacity * 1.5))}/month and you'd get there in ~${faster} months\n• If you need it sooner, weigh an EMI against your monthly budget\n\n_Not financial advice — based on your recorded numbers._`;
+}
+
+// "show me my last 10 transactions", "recent expenses", "latest income".
+// These mean "the N most recent, all-time" — NOT a calendar period.
+function answerRecentList(q: string, data: BotData): string | null {
+  const recentSignal = /\b(recent|latest|last|past|show me|show all|show my|list|view|see)\b/.test(q);
+  const entityWord = /\b(transactions?|expenses?|incomes?|savings?|payments?|entries|deposits?|spends?)\b/.test(q);
+  if (!recentSignal || !entityWord) return null;
+  const sym = data.settings?.currency_symbol ?? '₹';
+  const fc = (n: number) => formatCurrency(n, sym);
+  const numMatch = q.match(/\b(\d{1,3})\b/);
+  const n = Math.min(50, Math.max(1, numMatch ? parseInt(numMatch[1], 10) : 10));
+  const entity = classifyEntity(q);
+  const { items, noun } = pickEntity(entity, data.transactions, data.income);
+  if (!items.length) return `You have no ${noun}s recorded yet.`;
+  const sorted = [...items].sort((a, b) => b.date.localeCompare(a.date)).slice(0, n);
+  const rows = sorted.map(t => `• ${t.date} · ${descOf(t) || noun} · ${fc(t.amount)}`);
+  return `🧾 Your last ${sorted.length} ${noun}${sorted.length === 1 ? '' : 's'}:\n${rows.join('\n')}\n\nTotal shown: ${fc(sum(sorted))}`;
 }
 
 function answerDataQuery(q: string, data: BotData): string {
@@ -502,6 +521,9 @@ function localAnswer(rawQuery: string, data: BotData, me: UserInfo): { reply: Bo
   if (intent === 'balance') return { reply: { text: answerBalance(q, data, n => formatCurrency(n, data.settings?.currency_symbol ?? '₹')) }, confident: true };
   if (hasDate) return { reply: { text: answerDataQuery(q, data) }, confident: true };
 
+  // "last 10 transactions" / "recent expenses" → N most recent, all-time
+  const recent = answerRecentList(q, data); if (recent) return { reply: { text: recent }, confident: true };
+
   const kb = findKB(q); if (kb) return { reply: { value: liveValueFor(kb, data) ?? undefined, entry: kb }, confident: true };
 
   const dataSignals = intent !== 'unknown' || /\b(transaction|transactions|expense|expenses|income|saving|savings|spent|earned|paid)\b/.test(q);
@@ -602,8 +624,52 @@ export function FinanceBot() {
   const [me, setMe] = useState<UserInfo>({});
   const [aiAvailable, setAiAvailable] = useState<boolean | null>(null); // null=unknown, false=no key
   const [busy, setBusy] = useState(false);
+  const [enabled, setEnabled] = useState(true);
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null); // draggable FAB position
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const dragRef = useRef<{ sx: number; sy: number; ox: number; oy: number; moved: boolean } | null>(null);
+
+  // Enable/disable (synced with the Settings toggle, stored locally)
+  useEffect(() => {
+    setEnabled(localStorage.getItem('mcs_bot_enabled') !== '0');
+    const saved = localStorage.getItem('mcs_bot_pos');
+    if (saved) { try { setPos(JSON.parse(saved)); } catch { /* ignore */ } }
+    const onToggle = (e: Event) => { setEnabled((e as CustomEvent).detail !== false); };
+    window.addEventListener('mcs-bot-toggle', onToggle as EventListener);
+    return () => window.removeEventListener('mcs-bot-toggle', onToggle as EventListener);
+  }, []);
+
+  const hideBot = () => {
+    setOpen(false);
+    localStorage.setItem('mcs_bot_enabled', '0');
+    window.dispatchEvent(new CustomEvent('mcs-bot-toggle', { detail: false }));
+    toast('Assistant hidden. Re-enable it in Settings → Preferences.', { icon: '🤖' });
+  };
+
+  // --- Draggable FAB (so it never blocks content, esp. on mobile) ---
+  const FAB = 56;
+  const clampPos = (x: number, y: number) => ({
+    x: Math.min(Math.max(8, x), (typeof window !== 'undefined' ? window.innerWidth : 400) - FAB - 8),
+    y: Math.min(Math.max(8, y), (typeof window !== 'undefined' ? window.innerHeight : 800) - FAB - 8),
+  });
+  const onPointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    dragRef.current = { sx: e.clientX, sy: e.clientY, ox: r.left, oy: r.top, moved: false };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const onPointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
+    const d = dragRef.current; if (!d) return;
+    const dx = e.clientX - d.sx, dy = e.clientY - d.sy;
+    if (Math.abs(dx) > 5 || Math.abs(dy) > 5) d.moved = true;
+    if (d.moved) setPos(clampPos(d.ox + dx, d.oy + dy));
+  };
+  const onPointerUp = () => {
+    const d = dragRef.current; dragRef.current = null;
+    if (!d) return;
+    if (d.moved) { if (pos) localStorage.setItem('mcs_bot_pos', JSON.stringify(pos)); }
+    else { setOpen(o => !o); } // a tap (not a drag) toggles the panel
+  };
 
   // Who is signed in (for "what is my name/email")
   useEffect(() => {
@@ -670,13 +736,24 @@ export function FinanceBot() {
 
   const onKey = (e: React.KeyboardEvent<HTMLInputElement>) => { if (e.key === 'Enter') { e.preventDefault(); send(input); } };
 
+  // Disabled from Settings → render nothing at all.
+  if (!enabled) return null;
+
+  // FAB position: dragged spot if set, otherwise default bottom-right.
+  const fabStyle = pos
+    ? { left: pos.x, top: pos.y, right: 'auto' as const, bottom: 'auto' as const }
+    : { right: 24, bottom: 24 };
+
   return (
     <>
-      {/* Floating button — bottom-RIGHT, z-40 so z-50 modals always cover it */}
+      {/* Draggable floating button — z-40 so z-50 modals always cover it */}
       <button
-        onClick={() => setOpen(o => !o)}
-        className="fixed bottom-6 right-6 z-40 w-14 h-14 rounded-full bg-blue-600 hover:bg-blue-700 active:scale-95 shadow-lg flex items-center justify-center text-white transition-all duration-200"
-        title="Finance Bot"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        style={{ ...fabStyle, touchAction: 'none' }}
+        className="fixed z-40 w-14 h-14 rounded-full bg-blue-600 hover:bg-blue-700 active:scale-95 shadow-lg flex items-center justify-center text-white transition-colors duration-200 cursor-grab active:cursor-grabbing"
+        title="Finance Bot (drag to move)"
         aria-label="Open Finance Bot"
       >
         {open ? <X size={22} /> : <Bot size={22} />}
@@ -684,9 +761,11 @@ export function FinanceBot() {
 
       {open && (
         <div
-          className="fixed bottom-24 right-6 z-40 flex flex-col rounded-2xl shadow-2xl border overflow-hidden animate-fade-in-up"
+          className="fixed z-40 flex flex-col rounded-2xl shadow-2xl border overflow-hidden animate-fade-in-up"
           style={{
-            width: 400, maxWidth: 'calc(100vw - 3rem)', height: 560, maxHeight: 'calc(100vh - 8rem)',
+            right: 16, bottom: 88,
+            width: 'min(400px, calc(100vw - 24px))',
+            height: 'min(560px, calc(100dvh - 120px))',
             background: 'var(--bg-primary, #ffffff)', borderColor: 'var(--border-default, #e2e8f0)',
           }}
         >
@@ -700,9 +779,14 @@ export function FinanceBot() {
                 <p className="text-[10px]" style={{ color: 'var(--text-muted, #94a3b8)' }}>Reads your real data · private</p>
               </div>
             </div>
-            <button onClick={() => setOpen(false)} className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors" aria-label="Close">
-              <X size={16} style={{ color: 'var(--text-secondary)' }} />
-            </button>
+            <div className="flex items-center gap-1">
+              <button onClick={hideBot} className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors" aria-label="Hide assistant" title="Hide (re-enable in Settings)">
+                <EyeOff size={15} style={{ color: 'var(--text-secondary)' }} />
+              </button>
+              <button onClick={() => setOpen(false)} className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors" aria-label="Close">
+                <X size={16} style={{ color: 'var(--text-secondary)' }} />
+              </button>
+            </div>
           </div>
 
           <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3">

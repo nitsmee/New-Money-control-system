@@ -1,5 +1,5 @@
 'use client';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useAppStore } from '@/lib/store/appStore';
 import { createClient } from '@/lib/supabase/client';
 import { Account, Category, Owner, UserSettings } from '@/types';
@@ -138,6 +138,16 @@ export default function SettingsPage() {
   const [prefForm, setPrefForm] = useState({ theme: settings?.theme??'light', font_choice: settings?.font_choice??'dm-sans', currency: settings?.currency??'INR', currency_symbol: settings?.currency_symbol??'₹', safe_spend_buffer: settings?.safe_spend_buffer??5000, sweep_enabled: settings?.sweep_enabled ?? true });
   const [savingPrefs, setSavingPrefs] = useState(false);
   const [exporting, setExporting] = useState(false);
+
+  // Finance Bot visibility (stored locally, no DB needed). Lets the user
+  // disable/enable the floating assistant — handy on small screens.
+  const [botEnabled, setBotEnabled] = useState(true);
+  useEffect(() => { setBotEnabled(localStorage.getItem('mcs_bot_enabled') !== '0'); }, []);
+  const toggleBot = (on: boolean) => {
+    setBotEnabled(on);
+    localStorage.setItem('mcs_bot_enabled', on ? '1' : '0');
+    window.dispatchEvent(new CustomEvent('mcs-bot-toggle', { detail: on }));
+  };
 
   const handleExportData = async () => {
     setExporting(true);
@@ -474,6 +484,13 @@ export default function SettingsPage() {
               <span>
                 Auto-sweep leftover into savings on payday
                 <span className="block text-xs mt-0.5" style={{ color:'var(--text-muted)' }}>When you add a salary for the current month, move whatever is left in that account into your savings bucket so it resets to just the new salary. You&apos;ll be asked to confirm each time.</span>
+              </span>
+            </label>
+            <label className="flex items-start gap-2 cursor-pointer text-sm">
+              <input type="checkbox" className="w-4 h-4 mt-0.5 accent-blue-600" checked={botEnabled} onChange={e => toggleBot(e.target.checked)}/>
+              <span>
+                Show Finance Bot assistant
+                <span className="block text-xs mt-0.5" style={{ color:'var(--text-muted)' }}>The floating 🤖 button that answers questions about your money. Turn it off to hide it completely (useful on small screens). You can drag the button anywhere to move it out of the way.</span>
               </span>
             </label>
             <button onClick={savePrefs} disabled={savingPrefs} className="btn-md btn-primary w-full mt-2">
