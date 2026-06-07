@@ -108,43 +108,50 @@ export const useAppStore = create<AppState>()(
         set({ isLoading: true });
         const sb = createClient();
 
-        const [
-          { data: accounts },
-          { data: categories },
-          { data: owners },
-          { data: income },
-          { data: transactions },
-          { data: fixedExpenses },
-          { data: budgets },
-          { data: goals },
-          { data: settings },
-          { data: recurringIncomeData },
-        ] = await Promise.all([
-          sb.from('accounts').select('*').eq('user_id', userId).order('sort_order'),
-          sb.from('categories').select('*').eq('user_id', userId).order('sort_order'),
-          sb.from('owners').select('*').eq('user_id', userId).order('sort_order'),
-          sb.from('income').select('*').eq('user_id', userId).order('date', { ascending: false }),
-          sb.from('transactions').select('*').eq('user_id', userId).order('date', { ascending: false }),
-          sb.from('fixed_expenses').select('*').eq('user_id', userId).order('sort_order'),
-          sb.from('budget').select('*').eq('user_id', userId),
-          sb.from('goals').select('*').eq('user_id', userId).order('priority'),
-          sb.from('user_settings').select('*').eq('user_id', userId).single(),
-          sb.from('recurring_income').select('*').eq('user_id', userId).order('created_at'),
-        ]);
+        try {
+          const [
+            { data: accounts },
+            { data: categories },
+            { data: owners },
+            { data: income },
+            { data: transactions },
+            { data: fixedExpenses },
+            { data: budgets },
+            { data: goals },
+            { data: settings },
+            { data: recurringIncomeData },
+          ] = await Promise.all([
+            sb.from('accounts').select('*').eq('user_id', userId).order('sort_order'),
+            sb.from('categories').select('*').eq('user_id', userId).order('sort_order'),
+            sb.from('owners').select('*').eq('user_id', userId).order('sort_order'),
+            sb.from('income').select('*').eq('user_id', userId).order('date', { ascending: false }),
+            sb.from('transactions').select('*').eq('user_id', userId).order('date', { ascending: false }),
+            sb.from('fixed_expenses').select('*').eq('user_id', userId).order('sort_order'),
+            sb.from('budget').select('*').eq('user_id', userId),
+            sb.from('goals').select('*').eq('user_id', userId).order('priority'),
+            sb.from('user_settings').select('*').eq('user_id', userId).single(),
+            sb.from('recurring_income').select('*').eq('user_id', userId).order('created_at'),
+          ]);
 
-        set({
-          accounts: accounts ?? [],
-          categories: categories ?? [],
-          owners: owners ?? [],
-          income: income ?? [],
-          transactions: transactions ?? [],
-          fixedExpenses: fixedExpenses ?? [],
-          budgets: budgets ?? [],
-          goals: goals ?? [],
-          settings: settings ?? null,
-          recurringIncome: recurringIncomeData ?? [],
-          isLoading: false,
-        });
+          set({
+            accounts: accounts ?? [],
+            categories: categories ?? [],
+            owners: owners ?? [],
+            income: income ?? [],
+            transactions: transactions ?? [],
+            fixedExpenses: fixedExpenses ?? [],
+            budgets: budgets ?? [],
+            goals: goals ?? [],
+            settings: settings ?? null,
+            recurringIncome: recurringIncomeData ?? [],
+          });
+        } catch (e) {
+          // A failed fetch must never leave the app stuck on the loading
+          // skeleton — surface nothing, just stop loading.
+          console.error('loadAll failed:', e);
+        } finally {
+          set({ isLoading: false });
+        }
       },
 
       refreshData: async (userId: string) => {

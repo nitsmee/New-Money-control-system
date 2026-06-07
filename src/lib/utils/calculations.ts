@@ -389,7 +389,10 @@ export function calculateBudgetStatus(
 export function analyzeGoal(goal: Goal, availableSaving: number): GoalAnalysis {
   const remaining_gap = Math.max(0, goal.expected_cost - availableSaving);
   const can_buy_now = availableSaving >= goal.expected_cost;
-  const progress_percent = Math.min(100, (availableSaving / goal.expected_cost) * 100);
+  // Guard divide-by-zero: a zero-cost goal is trivially 100% funded.
+  const progress_percent = goal.expected_cost > 0
+    ? Math.min(100, (availableSaving / goal.expected_cost) * 100)
+    : 100;
 
   let months_needed = 0;
   if (!can_buy_now && goal.monthly_saving_plan > 0) {
@@ -665,6 +668,8 @@ export function formatCurrency(
   symbol = '₹',
   compact = false
 ): string {
+  // Guard against NaN / Infinity leaking into the UI as "NaN"/"Infinity".
+  if (!Number.isFinite(amount)) amount = 0;
   // FIX: render negatives as "-₹1,234" instead of "₹1,234 (-)".
   const sign = amount < 0 ? '-' : '';
   const abs = Math.abs(amount);

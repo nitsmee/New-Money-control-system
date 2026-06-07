@@ -185,12 +185,17 @@ function parseDateRange(q: string, today = new Date()): DateRange | null {
   }
   const wd = q.match(/\b(last|this|previous|past)\s+(sunday|sun|monday|mon|tuesday|tue|tues|wednesday|wed|thursday|thu|thurs|friday|fri|saturday|sat)\b/);
   if (wd) {
-    const target = WEEKDAYS[wd[2]]; const dow = getDay(t); let diff = dow - target; if (diff <= 0) diff += 7;
-    const d = subDays(t, diff); return { start: fmt(d), end: fmt(d), label: `${wd[1]} ${cap(wd[2])}` };
+    const target = WEEKDAYS[wd[2]]; const dow = getDay(t);
+    let diff = (dow - target + 7) % 7; // 0..6 = most recent occurrence incl. today
+    const qualifier = wd[1];
+    // "last/previous/past <day>" on the same weekday means a full week ago.
+    if (diff === 0 && qualifier !== 'this') diff = 7;
+    const d = subDays(t, diff); return { start: fmt(d), end: fmt(d), label: `${qualifier} ${cap(wd[2])}` };
   }
   const bareWd = q.match(/\b(?:on\s+)?(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/);
   if (bareWd) {
-    const target = WEEKDAYS[bareWd[1]]; const dow = getDay(t); let diff = dow - target; if (diff < 0) diff += 7;
+    const target = WEEKDAYS[bareWd[1]]; const dow = getDay(t);
+    const diff = (dow - target + 7) % 7; // most recent occurrence incl. today
     const d = subDays(t, diff); return { start: fmt(d), end: fmt(d), label: cap(bareWd[1]) + (diff === 0 ? ' (today)' : '') };
   }
   if (/\bthis week\b/.test(q)) return { start: fmt(startOfWeek(t, { weekStartsOn: 1 })), end: fmt(endOfWeek(t, { weekStartsOn: 1 })), label: 'this week' };
@@ -360,7 +365,9 @@ function answerAffordability(q: string, data: BotData): string | null {
   let price = parseAmount(q);
   let itemName = '';
   if (price == null) {
-    const g = data.goals.find(g => q.includes(g.name.toLowerCase()) || (g.goal_type && q.includes(g.goal_type.toLowerCase())));
+    // Word-boundary match so "Car" goal doesn't match "carnival".
+    const hits = (s: string) => new RegExp(`\\b${escapeRegex(s.toLowerCase())}\\b`).test(q);
+    const g = data.goals.find(g => hits(g.name) || (g.goal_type ? hits(g.goal_type) : false));
     if (g) { price = g.expected_cost; itemName = g.name; }
   }
   if (price == null) {
@@ -634,10 +641,29 @@ export function FinanceBot() {
   useEffect(() => {
     setEnabled(localStorage.getItem('mcs_bot_enabled') !== '0');
     const saved = localStorage.getItem('mcs_bot_pos');
-    if (saved) { try { setPos(JSON.parse(saved)); } catch { /* ignore */ } }
+    if (saved) {
+      try {
+        const p = JSON.parse(saved);
+        // Clamp in case the window is now smaller than when it was saved,
+        // otherwise the button could sit off-screen and be unreachable.
+        setPos({
+          x: Math.min(Math.max(8, p.x), window.innerWidth - 56 - 8),
+          y: Math.min(Math.max(8, p.y), window.innerHeight - 56 - 8),
+        });
+      } catch { /* ignore */ }
+    }
     const onToggle = (e: Event) => { setEnabled((e as CustomEvent).detail !== false); };
     window.addEventListener('mcs-bot-toggle', onToggle as EventListener);
-    return () => window.removeEventListener('mcs-bot-toggle', onToggle as EventListener);
+    // Keep the button on-screen if the viewport is resized/rotated.
+    const onResize = () => setPos(p => p ? {
+      x: Math.min(Math.max(8, p.x), window.innerWidth - 56 - 8),
+      y: Math.min(Math.max(8, p.y), window.innerHeight - 56 - 8),
+    } : p);
+    window.addEventListener('resize', onResize);
+    return () => {
+      window.removeEventListener('mcs-bot-toggle', onToggle as EventListener);
+      window.removeEventListener('resize', onResize);
+    };
   }, []);
 
   const hideBot = () => {

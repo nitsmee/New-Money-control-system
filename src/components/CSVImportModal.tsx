@@ -174,6 +174,11 @@ export function CSVImportModal({ isOpen, onClose, onImported }: Props) {
       setProgress(Math.round(((i + batchSize) / rowsToImport.length) * 100));
     }
 
+    // Refresh the store so imported rows appear immediately (no manual reload).
+    if (imported > 0) {
+      try { await useAppStore.getState().loadAll(user.id); } catch { /* non-fatal */ }
+    }
+
     const skipMsg = skipped > 0 ? ` (${skipped} duplicate${skipped > 1 ? 's' : ''} skipped)` : '';
     toast.success(`Imported ${imported} transactions${skipMsg}`);
     onImported(imported);

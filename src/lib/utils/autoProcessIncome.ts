@@ -30,6 +30,12 @@ export async function runAutoProcessIncome(
 
   for (const ri of activeItems) {
     try {
+      // Income rows require a destination account (NOT NULL). Skip templates
+      // that have none so the batch insert can't fail on the whole run.
+      if (!ri.to_account_id) {
+        result.errors.push(`${ri.name}: no destination account set — skipped`);
+        continue;
+      }
       // Get all due occurrences up to today
       const occurrences = getDueOccurrences(
         { due_day: ri.due_day, start_date: ri.start_date, end_date: ri.end_date ?? undefined },

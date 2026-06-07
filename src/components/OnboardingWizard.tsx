@@ -86,6 +86,13 @@ export function OnboardingWizard({ isOpen, onComplete }: Props) {
   async function saveStep2() {
     const amt = parseFloat(incomeAmount);
     if (!amt || amt <= 0) { toast.error('Enter a valid amount'); return; }
+    // Income needs a destination account (NOT NULL). If Step 1 was skipped,
+    // there's no account yet — skip income gracefully instead of a failed insert.
+    if (!createdAccountId) {
+      toast('Add an account first to record income — skipping for now.', { icon: 'ℹ️' });
+      setStep(3);
+      return;
+    }
     setSaving(true);
     try {
       const supabase = createClient();
@@ -96,7 +103,7 @@ export function OnboardingWizard({ isOpen, onComplete }: Props) {
         amount: amt,
         source: incomeSource,
         category: incomeSource,
-        to_account_id: createdAccountId || null,
+        to_account_id: createdAccountId,
         include_in_true_income: true,
         owner_purpose: 'Personal',
         user_id: user.id,
