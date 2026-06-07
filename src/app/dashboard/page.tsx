@@ -4,7 +4,7 @@ import { useAppStore } from '@/lib/store/appStore';
 import {
   calculateAccountBalances, calculateDashboardKPIs, calculateBudgetStatus,
   buildMonthlyTrends, getCategorySpend, generateAlerts, formatCurrency, formatDate, accountRole, safeDueDate,
-  currencySymbol, normalizeAmounts, YEAR_OPTIONS
+  currencySymbol, normalizeAmounts, convertAmount, YEAR_OPTIONS
 } from '@/lib/utils/calculations';
 import { useDisplayCurrency } from '@/lib/useDisplayCurrency';
 import { CurrencySelect } from '@/components/CurrencySelect';
@@ -118,18 +118,29 @@ export default function DashboardPage() {
   const txSymbol = (tx: { from_account_id?: string | null; to_account_id?: string | null }) =>
     currencySymbol(acctCurrency.get(tx.from_account_id ?? tx.to_account_id ?? '') || base);
 
-  // RAW balances — each account in its own native currency (Account Balances list).
-  const balances = useMemo(() => calculateAccountBalances(accounts, income, transactions), [accounts, income, transactions]);
+  // Fixed-expense amounts converted from each bill's from-account native
+  // currency into the display currency — so upcoming totals don't mix ฿ and ₹.
+  const displayFixedExpenses = useMemo(() => {
+    const curById = (id?: string | null) => accounts.find(a => a.id === id)?.currency || base;
+    return fixedExpenses.map(fe => ({
+      ...fe,
+      amount: convertAmount(fe.amount, (fe.from_account_id && curById(fe.from_account_id)) || base, displayCur, rates, base),
+    }));
+  }, [fixedExpenses, accounts, base, displayCur, rates]);
+
+  // RAW balances — each account in its own native currency (Account Balances
+  // list). rates/base let cross-currency transfers credit the correct amount.
+  const balances = useMemo(() => calculateAccountBalances(accounts, income, transactions, rates, base), [accounts, income, transactions, rates, base]);
   // NORMALIZED balances — every figure in the display currency (KPI totals, alerts).
   const normBalances = useMemo(() => calculateAccountBalances(norm.accounts, norm.income, norm.transactions), [norm]);
-  const kpis = useMemo(() => settings ? calculateDashboardKPIs(norm.accounts, norm.income, norm.transactions, fixedExpenses, filter, settings) : null, [norm, fixedExpenses, filter, settings]);
-  const budgetStatus = useMemo(() => calculateBudgetStatus(budgets, norm.transactions, fixedExpenses, now, selMonth, selYear), [budgets, norm.transactions, fixedExpenses, selMonth, selYear]);
+  const kpis = useMemo(() => settings ? calculateDashboardKPIs(norm.accounts, norm.income, norm.transactions, displayFixedExpenses, filter, settings) : null, [norm, displayFixedExpenses, filter, settings]);
+  const budgetStatus = useMemo(() => calculateBudgetStatus(budgets, norm.transactions, displayFixedExpenses, now, selMonth, selYear), [budgets, norm.transactions, displayFixedExpenses, selMonth, selYear]);
   const trends = useMemo(() => buildMonthlyTrends(norm.income, norm.transactions, 12), [norm.income, norm.transactions]);
   const catSpend = useMemo(() => getCategorySpend(
     norm.transactions.filter(t => t.date.startsWith(period)),
     categories.map(c => ({ name: c.name, color: c.color }))
   ), [norm.transactions, period, categories]);
-  const activeAlerts = useMemo(() => generateAlerts(budgetStatus, normBalances, fixedExpenses, settings ?? { safe_spend_buffer: 5000 } as any, sym), [budgetStatus, normBalances, fixedExpenses, settings, sym]);
+  const activeAlerts = useMemo(() => generateAlerts(budgetStatus, normBalances, displayFixedExpenses, settings ?? { safe_spend_buffer: 5000 } as any, sym), [budgetStatus, normBalances, displayFixedExpenses, settings, sym]);
 
   const balOf = (id?: string) => normBalances.find(b => b.account.id === id);
 
@@ -157,7 +168,7 @@ export default function DashboardPage() {
   // corrected "upcoming" total — excludes already-paid and other-month dues).
   const upcomingFixedList = useMemo(() => {
     const postedKeys = new Set(transactions.filter(t => t.fixed_expense_id && t.period).map(t => `${t.fixed_expense_id}:${t.period}`));
-    return fixedExpenses
+    return displayFixedExpenses
       .filter(fe => {
         if (!fe.is_active) return false;
         const occ = safeDueDate(fe.due_day, selYear, selMonth - 1);
@@ -167,7 +178,7 @@ export default function DashboardPage() {
       })
       .map(fe => ({ fe, occ: safeDueDate(fe.due_day, selYear, selMonth - 1) }))
       .sort((a, b) => a.occ.localeCompare(b.occ));
-  }, [fixedExpenses, transactions, selYear, selMonth, period]);
+  }, [displayFixedExpenses, transactions, selYear, selMonth, period]);
 
   // Split this month's "saving" transactions into true savings vs investments
   // (a saving whose destination is an investment account is an investment).

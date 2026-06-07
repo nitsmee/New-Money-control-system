@@ -36,7 +36,7 @@ export default function GoalsPage() {
   const sym = currencySymbol(displayCur);
 
   // RAW balances — kept so each account's native currency is known for conversion.
-  const balances = useMemo(() => calculateAccountBalances(accounts, income, transactions), [accounts, income, transactions]);
+  const balances = useMemo(() => calculateAccountBalances(accounts, income, transactions, rates, base), [accounts, income, transactions, rates, base]);
   // Each contributing account balance converted from its native currency to display.
   const savingsBalances = useMemo(
     () => balances

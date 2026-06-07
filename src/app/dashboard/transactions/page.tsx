@@ -265,6 +265,12 @@ export default function TransactionsPage() {
     if (form.type === 'credit_card_payment') {
       const toAcc = accounts.find(a => a.id === form.to_account_id);
       if (!toAcc?.is_credit_card) { toast.error('To Account must be a Credit Card for bill payments'); return false; }
+      const fromAcc = accounts.find(a => a.id === form.from_account_id);
+      if (fromAcc?.is_credit_card) { toast.error('Payment source must be a bank/cash account, not a credit card'); return false; }
+    }
+    if (form.type === 'initial_balance' && form.to_account_id) {
+      const existing = transactions.find(t => t.type === 'initial_balance' && t.to_account_id === form.to_account_id && t.id !== editing?.id);
+      if (existing) { toast.error('This account already has an Initial Balance. Edit that entry or use an Adjustment instead.'); return false; }
     }
     return true;
   };

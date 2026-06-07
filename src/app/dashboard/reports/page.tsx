@@ -68,7 +68,7 @@ export default function ReportsPage() {
   const monthCatSpend = useMemo(() => getCategorySpend(monthlyTx, []), [monthlyTx]);
   const budgetStatuses = useMemo(() => calculateBudgetStatus(budgets, norm.transactions, fixedExpenses, new Date(), selMonth, selYear), [budgets, norm.transactions, fixedExpenses, selMonth, selYear]);
   // RAW balances — each account shown in its own native currency (closing balances).
-  const balances = useMemo(() => calculateAccountBalances(accounts, income, transactions), [accounts, income, transactions]);
+  const balances = useMemo(() => calculateAccountBalances(accounts, income, transactions, rates, base), [accounts, income, transactions, rates, base]);
 
   // --- Yearly Data ---
   const yearlyIncome = useMemo(() => norm.income.filter(i => i.date.startsWith(String(selYear))), [norm.income, selYear]);

@@ -44,7 +44,9 @@ export function accountRole(a: Account): AccountRole {
 export function calculateAccountBalances(
   accounts: Account[],
   income: Income[],
-  transactions: Transaction[]
+  transactions: Transaction[],
+  rates?: Record<string, number>,
+  base?: string
 ): AccountBalance[] {
   const balanceMap = new Map<string, number>();
   accounts.forEach(a => balanceMap.set(a.id, 0));
@@ -52,6 +54,13 @@ export function calculateAccountBalances(
   // Fast lookup: is this account id a credit card?
   const ccSet = new Set(accounts.filter(a => a.is_credit_card).map(a => a.id));
   const isCC = (id?: string | null) => !!id && ccSet.has(id);
+  const curOf = (id?: string | null) => accounts.find(a => a.id === id)?.currency || base || '';
+
+  // For a cross-currency movement, the destination leg must be credited in the
+  // DESTINATION account's own currency. Convert from→to using stored rates.
+  // When rates/base aren't supplied (most callers), this is a no-op.
+  const toLeg = (amt: number, fromId?: string | null, toId?: string | null) =>
+    (rates && base) ? convertAmount(amt, curOf(fromId), curOf(toId), rates, base) : amt;
 
   const add = (id: string | null | undefined, delta: number) => {
     if (!id) return;
@@ -70,24 +79,27 @@ export function calculateAccountBalances(
         break;
       }
       case 'transfer': {
-        // From: CC outstanding up, bank down
+        // From: CC outstanding up, bank down (source currency)
         add(tx.from_account_id, isCC(tx.from_account_id) ? tx.amount : -tx.amount);
-        // To: CC outstanding down, bank up
-        add(tx.to_account_id, isCC(tx.to_account_id) ? -tx.amount : tx.amount);
+        // To: credited in the destination's own currency (converted if different)
+        const toAmt = toLeg(tx.amount, tx.from_account_id, tx.to_account_id);
+        add(tx.to_account_id, isCC(tx.to_account_id) ? -toAmt : toAmt);
         break;
       }
       case 'credit_card_payment': {
         // Pay the card from a bank account.
-        // Bank (from) goes down; CC (to) outstanding goes down.
+        // Bank (from) goes down in its currency; CC (to) outstanding goes down
+        // in the card's currency (converted if different).
         add(tx.from_account_id, -tx.amount);
-        add(tx.to_account_id, -tx.amount);
+        add(tx.to_account_id, -toLeg(tx.amount, tx.from_account_id, tx.to_account_id));
         break;
       }
       case 'saving': {
-        // From: CC outstanding up, bank down
+        // From: CC outstanding up, bank down (source currency)
         add(tx.from_account_id, isCC(tx.from_account_id) ? tx.amount : -tx.amount);
-        // To: a savings bucket (bank) goes up; if somehow a CC, outstanding down
-        add(tx.to_account_id, isCC(tx.to_account_id) ? -tx.amount : tx.amount);
+        // To: savings bucket up in its own currency (converted if different)
+        const toAmt = toLeg(tx.amount, tx.from_account_id, tx.to_account_id);
+        add(tx.to_account_id, isCC(tx.to_account_id) ? -toAmt : toAmt);
         break;
       }
       case 'initial_balance': {

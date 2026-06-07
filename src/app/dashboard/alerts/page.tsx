@@ -51,7 +51,10 @@ export default function AlertsPage() {
 
   // NORMALIZED balances/statuses/KPIs — every figure in the display currency.
   const balances = useMemo(() => calculateAccountBalances(norm.accounts, norm.income, norm.transactions), [norm]);
-  const budgetStatuses = useMemo(() => calculateBudgetStatus(budgets, norm.transactions, displayFixedExpenses, today, today.getMonth()+1, today.getFullYear()), [budgets, norm.transactions, displayFixedExpenses]);
+  // Budgets are stored in the BASE currency — convert to display so they're
+  // compared against the (already display-currency) normalized spend.
+  const displayBudgets = useMemo(() => budgets.map(b => ({ ...b, monthly_budget: convertAmount(b.monthly_budget, base, displayCur, rates, base) })), [budgets, base, displayCur, rates]);
+  const budgetStatuses = useMemo(() => calculateBudgetStatus(displayBudgets, norm.transactions, displayFixedExpenses, today, today.getMonth()+1, today.getFullYear()), [displayBudgets, norm.transactions, displayFixedExpenses]);
   const alerts = useMemo(() => generateAlerts(budgetStatuses, balances, displayFixedExpenses, settings ?? { safe_spend_buffer:5000 } as any, sym), [budgetStatuses, balances, displayFixedExpenses, settings, sym]);
   // Same engine the dashboard uses — guarantees the Safe-to-Spend number here matches it.
   const kpis = useMemo(() => calculateDashboardKPIs(norm.accounts, norm.income, norm.transactions, displayFixedExpenses, { view: 'monthly', month: today.getMonth()+1, year: today.getFullYear() }, settings ?? { safe_spend_buffer:5000 } as any), [norm, displayFixedExpenses, settings]);
