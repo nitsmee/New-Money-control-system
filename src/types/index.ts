@@ -206,6 +206,25 @@ export interface Goal {
   updated_at: string;
 }
 
+export interface RecurringIncome {
+  id: string;
+  user_id: string;
+  name: string;
+  amount: number;
+  to_account_id: string | null;
+  category: string;
+  owner_purpose: string | null;
+  due_day: number;
+  is_active: boolean;
+  start_date: string;
+  end_date: string | null;
+  last_processed_period: string | null;
+  include_in_true_income: boolean;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface UserSettings {
   id: string;
   user_id: string;
@@ -259,6 +278,7 @@ export interface BudgetStatus {
   days_in_month: number;
   days_elapsed: number;
   days_remaining: number;
+  projected_month_end: number;
   budget_entry?: Budget;
 }
 
@@ -282,6 +302,10 @@ export interface DashboardKPIs {
   net_cashflow: number;
   safe_to_spend: number;
   remaining_budget: number;
+  savings_rate: number;
+  mom_income_delta: number;
+  mom_expense_delta: number;
+  mom_savings_delta: number;
 
   // Upcoming
   upcoming_fixed_expenses: number;

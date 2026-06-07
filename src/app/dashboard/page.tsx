@@ -178,6 +178,12 @@ export default function DashboardPage() {
   ];
   if (investedPeriod !== 0) netRows.push({ label: 'Invested (SIP, funds)', amount: investedPeriod, sign: '-' });
 
+  // MoM delta chips — derived directly from kpis (already computed in calculateDashboardKPIs)
+  const momIncDelta = kpis?.mom_income_delta ?? 0;
+  const momExpDelta = kpis?.mom_expense_delta ?? 0;
+  const momSavDelta = kpis?.mom_savings_delta ?? 0;
+  const savingsRate = kpis?.savings_rate ?? 0;
+
   // ---- Card definitions (value + the detail panel each opens) ----
   const cards: { label: string; value: number; tone: 'pos' | 'neg' | 'plain'; sub: string; detail: DetailData }[] = [
     {
@@ -357,21 +363,57 @@ export default function DashboardPage() {
 
       {/* KPI cards (tap for breakdown) */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
-        {allCards.map((c, i) => (
-          <button
-            key={c.label}
-            onClick={() => setDetail(c.detail)}
-            className="card p-4 text-left w-full relative group transition-all duration-200 hover:-translate-y-1 hover:shadow-xl active:scale-[0.99] animate-fade-in-up"
-            style={{ animationDelay: `${i * 40}ms` }}
-          >
-            {c.label === 'Ready to sweep' || c.label === 'Swept to savings'
-              ? <ArrowDownToLine size={14} className="absolute top-3 right-3 text-blue-400 opacity-70 group-hover:opacity-100 transition-opacity" />
-              : <Info size={14} className="absolute top-3 right-3 text-slate-300 group-hover:text-blue-500 transition-colors" />}
-            <div className="text-xs sm:text-sm" style={{ color: 'var(--text-secondary)' }}>{c.label}</div>
-            <Amount value={c.value} sym={sym} className={`block text-xl sm:text-2xl font-bold mt-1 ${toneClass(c.tone)}`} />
-            <div className="text-[11px] sm:text-xs mt-1" style={{ color: 'var(--text-muted)' }}>{c.sub}</div>
-          </button>
-        ))}
+        {allCards.map((c, i) => {
+          // Determine which MoM delta to show for income / expense / savings cards
+          let momDelta: number | null = null;
+          let momDeltaPositiveIsGood = true;
+          if (c.label === 'Income this month') { momDelta = momIncDelta; momDeltaPositiveIsGood = true; }
+          else if (c.label === 'Net cashflow') { momDelta = momSavDelta; momDeltaPositiveIsGood = true; }
+          // Expense delta shown on Safe-to-spend (spending proxy): positive = spent more = bad
+          else if (c.label === 'Safe to spend') { momDelta = momExpDelta; momDeltaPositiveIsGood = false; }
+
+          const showDelta = momDelta !== null && Math.abs(momDelta) > 0;
+          const deltaGood = momDelta !== null && (momDeltaPositiveIsGood ? momDelta > 0 : momDelta < 0);
+          const deltaUp = momDelta !== null && momDelta > 0;
+
+          return (
+            <button
+              key={c.label}
+              onClick={() => setDetail(c.detail)}
+              className="card p-4 text-left w-full relative group transition-all duration-200 hover:-translate-y-1 hover:shadow-xl active:scale-[0.99] animate-fade-in-up"
+              style={{ animationDelay: `${i * 40}ms` }}
+            >
+              {c.label === 'Ready to sweep' || c.label === 'Swept to savings'
+                ? <ArrowDownToLine size={14} className="absolute top-3 right-3 text-blue-400 opacity-70 group-hover:opacity-100 transition-opacity" />
+                : <Info size={14} className="absolute top-3 right-3 text-slate-300 group-hover:text-blue-500 transition-colors" />}
+              <div className="text-xs sm:text-sm" style={{ color: 'var(--text-secondary)' }}>{c.label}</div>
+              <Amount value={c.value} sym={sym} className={`block text-xl sm:text-2xl font-bold mt-1 ${toneClass(c.tone)}`} />
+              <div className="text-[11px] sm:text-xs mt-1" style={{ color: 'var(--text-muted)' }}>{c.sub}</div>
+              {showDelta && momDelta !== null && (
+                <div className={`text-xs mt-1.5 font-medium ${deltaGood ? 'text-emerald-600' : 'text-red-500'}`}>
+                  {deltaUp ? '▲' : '▼'} {formatCurrency(Math.abs(momDelta), sym, true)} vs last month
+                </div>
+              )}
+            </button>
+          );
+        })}
+
+        {/* Savings Rate KPI card */}
+        <div
+          className="card p-4 text-left w-full relative animate-fade-in-up"
+          style={{ animationDelay: `${allCards.length * 40}ms` }}
+        >
+          <div className="text-xs sm:text-sm" style={{ color: 'var(--text-secondary)' }}>Savings Rate</div>
+          <div className={`block text-xl sm:text-2xl font-bold mt-1 ${savingsRate >= 20 ? 'text-emerald-600' : savingsRate >= 10 ? 'text-amber-500' : 'text-red-500'}`}>
+            {savingsRate.toFixed(1)}%
+          </div>
+          <div className="text-[11px] sm:text-xs mt-1" style={{ color: 'var(--text-muted)' }}>of true income</div>
+          {Math.abs(momSavDelta) > 0 && (
+            <div className={`text-xs mt-1.5 font-medium ${momSavDelta > 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+              {momSavDelta > 0 ? '▲' : '▼'} {formatCurrency(Math.abs(momSavDelta), sym, true)} vs last month
+            </div>
+          )}
+        </div>
       </div>
       <div className="-mt-2 space-y-1 text-xs" style={{ color: 'var(--text-muted)' }}>
         <div className="flex items-center gap-1.5"><Info size={13} /> Tap any card to see exactly how it's calculated.</div>

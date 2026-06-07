@@ -42,6 +42,7 @@ export default function BudgetPage() {
     totalActual: budgetStatuses.reduce((s, b) => s + b.actual_till_date, 0),
     overCount: budgetStatuses.filter(b => b.status === 'red').length,
     onTrack: budgetStatuses.filter(b => b.status === 'green').length,
+    projectedOverCount: budgetStatuses.filter(b => b.monthly_budget > 0 && b.projected_month_end > b.monthly_budget).length,
   }), [budgetStatuses]);
 
   const chartData = useMemo(() =>
@@ -119,12 +120,13 @@ export default function BudgetPage() {
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         {[
           { label: 'Total Budget', value: summary.totalBudget, color: 'text-blue-600', bg: 'bg-blue-50 dark:bg-blue-900/20' },
           { label: 'Total Actual', value: summary.totalActual, color: summary.totalActual > summary.totalBudget ? 'text-red-500' : 'text-emerald-600', bg: summary.totalActual > summary.totalBudget ? 'bg-red-50 dark:bg-red-900/20' : 'bg-emerald-50 dark:bg-emerald-900/20' },
           { label: 'Over Budget', value: null, badge: summary.overCount, color: 'text-red-500', bg: 'bg-red-50 dark:bg-red-900/20' },
           { label: 'On Track', value: null, badge: summary.onTrack, color: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-900/20' },
+          { label: 'Projected Over Budget', value: null, badge: summary.projectedOverCount, color: summary.projectedOverCount > 0 ? 'text-red-500' : 'text-emerald-600', bg: summary.projectedOverCount > 0 ? 'bg-red-50 dark:bg-red-900/20' : 'bg-emerald-50 dark:bg-emerald-900/20' },
         ].map(item => (
           <div key={item.label} className={`card card-p ${item.bg}`}>
             <p className="kpi-label">{item.label}</p>
@@ -199,6 +201,20 @@ export default function BudgetPage() {
                   <span>Remaining</span>
                   <span className={bs.remaining_monthly < 0 ? 'text-red-500 font-bold' : 'text-emerald-600 font-medium'}>{formatCurrency(bs.remaining_monthly, sym)}</span>
                 </div>
+                {bs.days_remaining > 3 && bs.monthly_budget > 0 && (
+                  <div className="flex justify-between items-center">
+                    <span>Projected Month-End</span>
+                    <span className="flex items-center gap-1">
+                      <span className={`font-semibold ${bs.projected_month_end > bs.monthly_budget ? 'text-red-500' : 'text-emerald-600'}`}>
+                        {formatCurrency(bs.projected_month_end, sym)}
+                      </span>
+                      {bs.projected_month_end > bs.monthly_budget
+                        ? <span className="text-[10px] font-semibold text-red-500 bg-red-50 dark:bg-red-900/20 px-1 py-0.5 rounded">⚠ Over</span>
+                        : <span className="text-[10px] font-semibold text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20 px-1 py-0.5 rounded">✓ OK</span>
+                      }
+                    </span>
+                  </div>
+                )}
                 {bs.overspent > 0 && (
                   <div className="flex justify-between text-red-500 font-medium">
                     <span>Overspent</span>

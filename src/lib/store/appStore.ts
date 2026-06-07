@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import {
   Account, AccountType, Category, Owner, Income, Transaction,
-  FixedExpense, Budget, Goal, UserSettings, IncomeSource, DateFilter
+  FixedExpense, Budget, Goal, UserSettings, IncomeSource, DateFilter, RecurringIncome
 } from '@/types';
 import { createClient } from '@/lib/supabase/client';
 
@@ -56,6 +56,12 @@ interface AppState {
   updateGoal: (id: string, g: Partial<Goal>) => void;
   removeGoal: (id: string) => void;
 
+  recurringIncome: RecurringIncome[];
+  setRecurringIncome: (items: RecurringIncome[]) => void;
+  addRecurringIncome: (item: RecurringIncome) => void;
+  updateRecurringIncome: (id: string, item: Partial<RecurringIncome>) => void;
+  removeRecurringIncome: (id: string) => void;
+
   addAccount: (a: Account) => void;
   updateAccount: (id: string, a: Partial<Account>) => void;
   removeAccount: (id: string) => void;
@@ -86,6 +92,7 @@ export const useAppStore = create<AppState>()(
       fixedExpenses: [],
       budgets: [],
       goals: [],
+      recurringIncome: [],
       settings: null,
       dateFilter: {
         view: 'monthly',
@@ -131,6 +138,9 @@ export const useAppStore = create<AppState>()(
           sb.from('user_settings').select('*').eq('user_id', userId).single(),
         ]);
 
+        const { data: riData } = await sb.from('recurring_income').select('*').eq('user_id', userId).order('created_at');
+        if (riData) set({ recurringIncome: riData });
+
         set({
           accounts: accounts ?? [],
           accountTypes: accountTypes ?? [],
@@ -175,6 +185,12 @@ export const useAppStore = create<AppState>()(
       addGoal: (g) => set(s => ({ goals: [g, ...s.goals] })),
       updateGoal: (id, data) => set(s => ({ goals: s.goals.map(g => g.id === id ? { ...g, ...data } : g) })),
       removeGoal: (id) => set(s => ({ goals: s.goals.filter(g => g.id !== id) })),
+
+      // Recurring income CRUD
+      setRecurringIncome: (items) => set({ recurringIncome: items }),
+      addRecurringIncome: (item) => set(s => ({ recurringIncome: [...s.recurringIncome, item] })),
+      updateRecurringIncome: (id, item) => set(s => ({ recurringIncome: s.recurringIncome.map(r => r.id === id ? { ...r, ...item } : r) })),
+      removeRecurringIncome: (id) => set(s => ({ recurringIncome: s.recurringIncome.filter(r => r.id !== id) })),
 
       // Account CRUD
       addAccount: (a) => set(s => ({ accounts: [...s.accounts, a] })),

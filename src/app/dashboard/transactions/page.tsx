@@ -6,7 +6,10 @@ import { Transaction, TransactionType, TRANSACTION_TYPES } from '@/types';
 import { formatCurrency } from '@/lib/utils/calculations';
 import { format, endOfMonth } from 'date-fns';
 import toast from 'react-hot-toast';
-import { Plus, Pencil, Trash2, X, Check, Filter } from 'lucide-react';
+import { Plus, Pencil, Trash2, X, Check, Upload } from 'lucide-react';
+import { DuplicateWarning } from '@/components/DuplicateWarning';
+import { QuickAddModal } from '@/components/QuickAddModal';
+import { CSVImportModal } from '@/components/CSVImportModal';
 
 const EMPTY = {
   date: new Date().toISOString().split('T')[0],
@@ -56,6 +59,22 @@ export default function TransactionsPage() {
   const [filterMonth, setFilterMonth] = useState(new Date().getMonth() + 1);
   const [filterYear, setFilterYear] = useState(new Date().getFullYear());
   const [filterType, setFilterType] = useState<TransactionType | 'all'>('all');
+
+  // Bulk selection
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+
+  // Duplicate warning
+  const [duplicateMatches, setDuplicateMatches] = useState<Transaction[]>([]);
+  const [pendingPayload, setPendingPayload] = useState<any | null>(null);
+  const [showDupWarning, setShowDupWarning] = useState(false);
+
+  // CSV import
+  const [showCSVImport, setShowCSVImport] = useState(false);
+
+  // Quick-add FAB
+  const [showQuickAdd, setShowQuickAdd] = useState(false);
+
   const sb = createClient();
   const sym = settings?.currency_symbol ?? '₹';
 
@@ -79,6 +98,42 @@ export default function TransactionsPage() {
     saving: filtered.filter(t => t.type === 'saving').reduce((s, t) => s + t.amount, 0),
     cc_payment: filtered.filter(t => t.type === 'credit_card_payment').reduce((s, t) => s + t.amount, 0),
   }), [filtered]);
+
+  const allVisibleSelected = filtered.length > 0 && filtered.every(t => selectedIds.has(t.id));
+
+  const toggleSelectAll = () => {
+    if (allVisibleSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filtered.map(t => t.id)));
+    }
+  };
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`Delete ${selectedIds.size} selected transaction(s)? This cannot be undone.`)) return;
+    setBulkDeleting(true);
+    try {
+      const ids = [...selectedIds];
+      const { error } = await sb.from('transactions').delete().in('id', ids);
+      if (error) throw error;
+      ids.forEach(id => removeTransaction(id));
+      setSelectedIds(new Set());
+      toast.success(`Deleted ${ids.length} transaction(s)`);
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
 
   const getFromAccounts = () => {
     if (form.type === 'credit_card_payment') return nonCcAccounts;
@@ -107,11 +162,17 @@ export default function TransactionsPage() {
     setEditing(null);
     const firstCat = expenseCategories[0]?.name ?? '';
     setForm({ ...EMPTY, from_account_id: defaultFromForCategory(firstCat) ?? (nonCcAccounts[0]?.id ?? ''), category: firstCat, owner_purpose: activeOwners[0]?.name ?? 'Personal' });
+    setShowDupWarning(false);
+    setPendingPayload(null);
+    setDuplicateMatches([]);
     setShowForm(true);
   };
   const openEdit = (tx: Transaction) => {
     setEditing(tx);
     setForm({ date: tx.date, amount: tx.amount, description: tx.description ?? '', type: tx.type, category: tx.category ?? '', owner_purpose: tx.owner_purpose ?? 'Personal', from_account_id: tx.from_account_id ?? '', to_account_id: tx.to_account_id ?? '', notes: tx.notes ?? '' });
+    setShowDupWarning(false);
+    setPendingPayload(null);
+    setDuplicateMatches([]);
     setShowForm(true);
   };
 
@@ -124,6 +185,17 @@ export default function TransactionsPage() {
       if (!toAcc?.is_credit_card) { toast.error('To Account must be a Credit Card for bill payments'); return false; }
     }
     return true;
+  };
+
+  const doInsert = async (payload: any) => {
+    const { data, error } = await sb.from('transactions').insert(payload).select().single();
+    if (error) throw error;
+    addTransaction(data);
+    toast.success('Transaction added');
+    setShowForm(false);
+    setShowDupWarning(false);
+    setPendingPayload(null);
+    setDuplicateMatches([]);
   };
 
   const handleSave = async () => {
@@ -145,13 +217,26 @@ export default function TransactionsPage() {
         if (error) throw error;
         updateTransaction(editing.id, data);
         toast.success('Transaction updated');
+        setShowForm(false);
       } else {
-        const { data, error } = await sb.from('transactions').insert(payload).select().single();
-        if (error) throw error;
-        addTransaction(data);
-        toast.success('Transaction added');
+        // Duplicate check (new transactions only)
+        const threeDaysAgo = new Date();
+        threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+        const dateStr = threeDaysAgo.toISOString().split('T')[0];
+        const matches = transactions.filter(t =>
+          t.amount === +form.amount &&
+          t.date >= dateStr &&
+          t.type === form.type
+        );
+        if (matches.length > 0) {
+          setDuplicateMatches(matches);
+          setPendingPayload(payload);
+          setShowDupWarning(true);
+          setSaving(false);
+          return;
+        }
+        await doInsert(payload);
       }
-      setShowForm(false);
     } catch (e: any) {
       toast.error(e.message);
     } finally { setSaving(false); }
@@ -175,7 +260,10 @@ export default function TransactionsPage() {
           <h1 className="page-title">Transactions</h1>
           <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Daily entries — expenses, transfers, savings, CC payments</p>
         </div>
-        <button onClick={openNew} className="btn-md btn-primary"><Plus size={16} /> Add Transaction</button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setShowCSVImport(true)} className="btn-md btn-secondary"><Upload size={16} /> Import CSV</button>
+          <button onClick={openNew} className="btn-md btn-primary"><Plus size={16} /> Add Transaction</button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -198,6 +286,26 @@ export default function TransactionsPage() {
           <span>CC Paid: <strong className="text-amber-600">{formatCurrency(totals.cc_payment, sym)}</strong></span>
         </div>
       </div>
+
+      {/* Bulk action bar */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 text-sm">
+          <span className="font-medium text-blue-800 dark:text-blue-200">{selectedIds.size} selected</span>
+          <button
+            onClick={handleBulkDelete}
+            disabled={bulkDeleting}
+            className="btn-md bg-red-600 text-white hover:bg-red-700 text-xs py-1.5 px-3 rounded-lg disabled:opacity-60"
+          >
+            {bulkDeleting ? 'Deleting…' : 'Delete Selected'}
+          </button>
+          <button
+            onClick={() => setSelectedIds(new Set())}
+            className="btn-md btn-secondary text-xs py-1.5 px-3 rounded-lg"
+          >
+            Clear
+          </button>
+        </div>
+      )}
 
       {/* Form Modal */}
       {showForm && (
@@ -301,12 +409,38 @@ export default function TransactionsPage() {
                 <textarea className="form-textarea" placeholder="Optional notes…" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} rows={2} />
               </div>
             </div>
-            <div className="p-5 border-t border-slate-100 dark:border-slate-700 flex justify-end gap-3">
-              <button onClick={() => setShowForm(false)} className="btn-md btn-secondary">Cancel</button>
-              <button onClick={handleSave} disabled={saving} className="btn-md btn-primary">
-                {saving ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Check size={16} />}
-                {saving ? 'Saving…' : editing ? 'Update' : 'Add'}
-              </button>
+            <div className="p-5 border-t border-slate-100 dark:border-slate-700 space-y-3">
+              {/* Duplicate warning shown above save button */}
+              {showDupWarning && (
+                <DuplicateWarning
+                  matches={duplicateMatches}
+                  amount={+form.amount}
+                  currencySymbol={sym}
+                  onDismiss={() => {
+                    setShowDupWarning(false);
+                    setPendingPayload(null);
+                    setDuplicateMatches([]);
+                  }}
+                  onConfirm={async () => {
+                    if (!pendingPayload) return;
+                    setSaving(true);
+                    try {
+                      await doInsert(pendingPayload);
+                    } catch (e: any) {
+                      toast.error(e.message);
+                    } finally {
+                      setSaving(false);
+                    }
+                  }}
+                />
+              )}
+              <div className="flex justify-end gap-3">
+                <button onClick={() => setShowForm(false)} className="btn-md btn-secondary">Cancel</button>
+                <button onClick={handleSave} disabled={saving} className="btn-md btn-primary">
+                  {saving ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Check size={16} />}
+                  {saving ? 'Saving…' : editing ? 'Update' : 'Add'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -317,11 +451,20 @@ export default function TransactionsPage() {
         <div className="table-container border-0">
           <table className="data-table">
             <thead><tr>
+              <th className="w-8">
+                <input
+                  type="checkbox"
+                  checked={allVisibleSelected}
+                  onChange={toggleSelectAll}
+                  className="w-4 h-4 accent-blue-600"
+                  title="Select all visible"
+                />
+              </th>
               <th>Date</th><th>Description</th><th>Type</th><th>Category</th><th>Owner</th><th>From</th><th>To</th><th className="text-right">Amount</th><th className="text-right">Actions</th>
             </tr></thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={9} className="text-center py-10 text-sm" style={{ color: 'var(--text-muted)' }}>
+                <tr><td colSpan={10} className="text-center py-10 text-sm" style={{ color: 'var(--text-muted)' }}>
                   No transactions for this period. Click "Add Transaction" to start.
                 </td></tr>
               )}
@@ -329,7 +472,15 @@ export default function TransactionsPage() {
                 const fromAcc = accounts.find(a => a.id === tx.from_account_id);
                 const toAcc = accounts.find(a => a.id === tx.to_account_id);
                 return (
-                  <tr key={tx.id}>
+                  <tr key={tx.id} className={selectedIds.has(tx.id) ? 'bg-blue-50 dark:bg-blue-900/10' : ''}>
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(tx.id)}
+                        onChange={() => toggleSelect(tx.id)}
+                        className="w-4 h-4 accent-blue-600"
+                      />
+                    </td>
                     <td className="text-xs whitespace-nowrap" style={{ color: 'var(--text-muted)' }}>{tx.date}</td>
                     <td className="max-w-xs text-sm">{tx.description || tx.category || '—'}</td>
                     <td><span className={`badge text-[10px] ${TYPE_COLOR[tx.type]}`}>{tx.type.replace(/_/g, ' ')}</span></td>
@@ -355,6 +506,32 @@ export default function TransactionsPage() {
           </table>
         </div>
       </div>
+
+      {/* CSV Import Modal */}
+      <CSVImportModal
+        isOpen={showCSVImport}
+        onClose={() => setShowCSVImport(false)}
+        onImported={(count) => {
+          toast.success(`Imported ${count} transactions`);
+          setShowCSVImport(false);
+        }}
+      />
+
+      {/* Quick Add Modal */}
+      <QuickAddModal
+        isOpen={showQuickAdd}
+        onClose={() => setShowQuickAdd(false)}
+        onSaved={() => setShowQuickAdd(false)}
+      />
+
+      {/* Floating Action Button */}
+      <button
+        onClick={() => setShowQuickAdd(true)}
+        className="fixed bottom-6 right-6 z-40 w-14 h-14 rounded-full bg-blue-600 text-white shadow-lg hover:bg-blue-700 flex items-center justify-center transition-all hover:scale-105"
+        title="Quick Add Transaction"
+      >
+        <Plus size={24} />
+      </button>
     </div>
   );
 }

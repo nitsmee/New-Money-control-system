@@ -10,7 +10,7 @@ import Papa from 'papaparse';
 type Tab = 'accounts'|'categories'|'owners'|'preferences';
 
 export default function SettingsPage() {
-  const { accounts, categories, owners, settings, addAccount, updateAccount, removeAccount, addCategory, updateCategory, removeCategory, addOwner, updateOwner, removeOwner, updateSettings, transactions, income } = useAppStore();
+  const { accounts, categories, owners, settings, addAccount, updateAccount, removeAccount, addCategory, updateCategory, removeCategory, addOwner, updateOwner, removeOwner, updateSettings, transactions, income, budgets, goals, fixedExpenses, recurringIncome } = useAppStore();
   const [tab, setTab] = useState<Tab>('accounts');
   const sb = createClient();
   const sym = settings?.currency_symbol ?? '₹';
@@ -137,6 +137,31 @@ export default function SettingsPage() {
   // ---- PREFERENCES ----
   const [prefForm, setPrefForm] = useState({ theme: settings?.theme??'light', font_choice: settings?.font_choice??'dm-sans', currency: settings?.currency??'INR', currency_symbol: settings?.currency_symbol??'₹', safe_spend_buffer: settings?.safe_spend_buffer??5000, sweep_enabled: settings?.sweep_enabled ?? true });
   const [savingPrefs, setSavingPrefs] = useState(false);
+  const [exporting, setExporting] = useState(false);
+
+  const handleExportData = async () => {
+    setExporting(true);
+    try {
+      const exportData = {
+        exported_at: new Date().toISOString(),
+        version: '1.0',
+        data: { accounts, transactions, income, budgets, goals, fixedExpenses, categories, owners, recurringIncome }
+      };
+      const json = JSON.stringify(exportData, null, 2);
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `money-control-backup-${new Date().toISOString().split('T')[0]}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success('Data exported successfully');
+    } catch (e: any) {
+      toast.error('Export failed: ' + e.message);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const savePrefs = async () => {
     setSavingPrefs(true);
@@ -385,6 +410,16 @@ export default function SettingsPage() {
           )}
         </div>
       )}
+
+      {/* Data Export Section */}
+      <div className="card card-p space-y-3">
+        <h3 className="section-title">Data Export</h3>
+        <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Export all your data as a JSON backup file.</p>
+        <button onClick={handleExportData} disabled={exporting} className="btn-md btn-secondary flex items-center gap-2">
+          {exporting ? <span className="w-4 h-4 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin"/> : <Download size={16}/>}
+          {exporting ? 'Exporting…' : 'Export All Data (JSON)'}
+        </button>
+      </div>
 
       {/* PREFERENCES TAB */}
       {tab==='preferences' && (

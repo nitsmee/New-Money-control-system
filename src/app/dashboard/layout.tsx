@@ -10,19 +10,24 @@ import {
   Monitor, Wallet, FlaskConical, Landmark
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { GlobalSearch } from '@/components/GlobalSearch';
+import { SessionWarning } from '@/components/SessionWarning';
+import { OnboardingWizard } from '@/components/OnboardingWizard';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 
 const NAV = [
-  { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-  { label: 'Accounts', href: '/dashboard/accounts', icon: Landmark },
-  { label: 'Income', href: '/dashboard/income', icon: TrendingUp },
-  { label: 'Transactions', href: '/dashboard/transactions', icon: ArrowLeftRight },
-  { label: 'Fixed Expenses', href: '/dashboard/fixed-expenses', icon: Repeat },
-  { label: 'Budget', href: '/dashboard/budget', icon: PieChart },
-  { label: 'Goals', href: '/dashboard/goals', icon: Target },
-  { label: 'Reports', href: '/dashboard/reports', icon: BarChart3 },
-  { label: 'Alerts', href: '/dashboard/alerts', icon: Bell },
-  { label: 'Test Results', href: '/dashboard/test-results', icon: FlaskConical },
-  { label: 'Settings', href: '/dashboard/settings', icon: Settings },
+  { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, key: 'D' },
+  { label: 'Accounts', href: '/dashboard/accounts', icon: Landmark, key: '' },
+  { label: 'Income', href: '/dashboard/income', icon: TrendingUp, key: 'I' },
+  { label: 'Recurring Income', href: '/dashboard/recurring-income', icon: Repeat, key: '' },
+  { label: 'Transactions', href: '/dashboard/transactions', icon: ArrowLeftRight, key: 'T' },
+  { label: 'Fixed Expenses', href: '/dashboard/fixed-expenses', icon: Repeat, key: '' },
+  { label: 'Budget', href: '/dashboard/budget', icon: PieChart, key: 'B' },
+  { label: 'Goals', href: '/dashboard/goals', icon: Target, key: 'G' },
+  { label: 'Reports', href: '/dashboard/reports', icon: BarChart3, key: 'R' },
+  { label: 'Alerts', href: '/dashboard/alerts', icon: Bell, key: '' },
+  { label: 'Test Results', href: '/dashboard/test-results', icon: FlaskConical, key: '' },
+  { label: 'Settings', href: '/dashboard/settings', icon: Settings, key: ',' },
 ];
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -31,6 +36,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const { sidebarOpen, setSidebarOpen, theme, setTheme, loadAll, settings } = useAppStore();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [user, setUser] = useState<{ email?: string; name?: string } | null>(null);
+  const [showOnboarding, setShowOnboarding] = useState(false);
   const initialized = useRef(false);
 
   useEffect(() => {
@@ -46,6 +52,35 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     };
     init();
   }, []);
+
+  // Onboarding check
+  useEffect(() => {
+    if (localStorage.getItem('mcs_onboarding_done') !== 'true') {
+      setShowOnboarding(true);
+    }
+  }, []);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement ||
+        e.target instanceof HTMLSelectElement
+      ) return;
+      switch (e.key) {
+        case 'd': router.push('/dashboard'); break;
+        case 't': router.push('/dashboard/transactions'); break;
+        case 'i': router.push('/dashboard/income'); break;
+        case 'b': router.push('/dashboard/budget'); break;
+        case 'r': router.push('/dashboard/reports'); break;
+        case 'g': router.push('/dashboard/goals'); break;
+        case ',': router.push('/dashboard/settings'); break;
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [router]);
 
   // Apply theme
   useEffect(() => {
@@ -74,7 +109,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const NavLinks = () => (
     <nav className="flex-1 px-3 py-2 space-y-0.5 overflow-y-auto">
-      {NAV.map(({ label, href, icon: Icon }) => {
+      {NAV.map(({ label, href, icon: Icon, key }) => {
         const active = href === '/dashboard' ? pathname === href : pathname.startsWith(href);
         return (
           <Link
@@ -88,7 +123,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               }`}
           >
             <Icon size={18} className={active ? 'text-blue-600 dark:text-blue-400' : 'text-slate-400 dark:text-slate-500 group-hover:text-slate-600 dark:group-hover:text-slate-300'} />
-            {(sidebarOpen || mobileOpen) && <span>{label}</span>}
+            {(sidebarOpen || mobileOpen) && (
+              <>
+                <span className="flex-1">{label}</span>
+                {key && (
+                  <span className="hidden lg:inline-block text-[10px] opacity-40 ml-auto font-mono bg-slate-100 dark:bg-slate-700 px-1 rounded">{key}</span>
+                )}
+              </>
+            )}
           </Link>
         );
       })}
@@ -108,6 +150,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="flex h-screen overflow-hidden" style={{ background: 'var(--bg-base)' }}>
+      <GlobalSearch />
+      <SessionWarning />
+      <OnboardingWizard isOpen={showOnboarding} onComplete={() => { setShowOnboarding(false); localStorage.setItem('mcs_onboarding_done', 'true'); }} />
       {/* Sidebar — Desktop */}
       <aside className={`hidden lg:flex flex-col transition-all duration-300 border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 ${sidebarOpen ? 'w-64' : 'w-[68px]'}`}>
         {/* Logo */}
@@ -188,7 +233,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
         {/* Page content */}
         <main className="flex-1 overflow-y-auto p-4 sm:p-6 animate-fade-in">
-          {children}
+          <ErrorBoundary>{children}</ErrorBoundary>
         </main>
 
         {/* Mobile bottom nav */}

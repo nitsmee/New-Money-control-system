@@ -260,6 +260,18 @@ export function calculateDashboardKPIs(
   const safe_to_spend =
     spendable_balance - bank_paid_upcoming - total_cc_outstanding - settings.safe_spend_buffer;
 
+  // Savings rate
+  const savings_rate = true_income > 0 ? (total_savings / true_income) * 100 : 0;
+
+  // Month-over-month deltas
+  const prevMonth = filter.month && filter.year
+    ? (filter.month === 1 ? { month: 12, year: filter.year - 1 } : { month: filter.month - 1, year: filter.year })
+    : (() => { const d = new Date(); return d.getMonth() === 0 ? { month: 12, year: d.getFullYear()-1 } : { month: d.getMonth(), year: d.getFullYear() }; })();
+  const prevTotals = getMonthTotals(allIncome, allTransactions, prevMonth.month, prevMonth.year);
+  const mom_income_delta = total_income - prevTotals.income;
+  const mom_expense_delta = total_expense - prevTotals.expense;
+  const mom_savings_delta = total_savings - prevTotals.savings;
+
   return {
     total_bank_balance,
     spendable_balance,
@@ -277,6 +289,10 @@ export function calculateDashboardKPIs(
     remaining_budget,
     upcoming_fixed_expenses,
     upcoming_cc_dues: total_cc_outstanding,
+    savings_rate,
+    mom_income_delta,
+    mom_expense_delta,
+    mom_savings_delta,
   };
 }
 
@@ -346,6 +362,9 @@ export function calculateBudgetStatus(
     else if (actualDiscretionary > allowedDiscretionary * 0.9) status = 'orange';
     else status = 'green';
 
+    const daily_spend_rate = dayOfMonth > 0 ? actual_till_date / dayOfMonth : 0;
+    const projected_month_end = actual_till_date + (daily_spend_rate * days_remaining);
+
     return {
       category: budget.category,
       monthly_budget: budget.monthly_budget,
@@ -359,6 +378,7 @@ export function calculateBudgetStatus(
       days_in_month: daysInMonth,
       days_elapsed: dayOfMonth,
       days_remaining,
+      projected_month_end,
       budget_entry: budget,
     };
   });
@@ -668,4 +688,22 @@ export function formatDate(dateStr: string, fmt = 'dd-MMM-yyyy'): string {
 
 export function cn(...classes: (string | undefined | null | false)[]): string {
   return classes.filter(Boolean).join(' ');
+}
+
+// ============================================================
+// MONTH-OVER-MONTH COMPARISON
+// ============================================================
+export function getMonthTotals(
+  income: Income[],
+  transactions: Transaction[],
+  month: number,
+  year: number
+): { income: number; expense: number; savings: number; trueIncome: number } {
+  const start = `${year}-${String(month).padStart(2,'0')}-01`;
+  const end = format(endOfMonth(new Date(year, month - 1)), 'yyyy-MM-dd');
+  const mIncome = income.filter(i => i.date >= start && i.date <= end).reduce((s,i) => s+i.amount, 0);
+  const mTrueIncome = income.filter(i => i.date >= start && i.date <= end && i.include_in_true_income).reduce((s,i) => s+i.amount, 0);
+  const mExpense = transactions.filter(t => t.type==='expense' && t.date >= start && t.date <= end).reduce((s,t) => s+t.amount, 0);
+  const mSavings = transactions.filter(t => t.type==='saving' && t.date >= start && t.date <= end).reduce((s,t) => s+t.amount, 0);
+  return { income: mIncome, expense: mExpense, savings: mSavings, trueIncome: mTrueIncome };
 }

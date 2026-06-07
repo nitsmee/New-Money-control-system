@@ -13,6 +13,7 @@ const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov
 export default function ReportsPage() {
   const { income, transactions, accounts, budgets, fixedExpenses, settings } = useAppStore();
   const [tab, setTab] = useState<'monthly'|'yearly'|'custom'>('monthly');
+  const [trendCategory, setTrendCategory] = useState<string>('');
   const [selMonth, setSelMonth] = useState(new Date().getMonth() + 1);
   const [selYear, setSelYear] = useState(new Date().getFullYear());
   const [startDate, setStartDate] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0]);
@@ -75,6 +76,19 @@ export default function ReportsPage() {
 
   const trends = useMemo(() => buildMonthlyTrends(income.filter(i => i.date.startsWith(String(selYear))), transactions.filter(t => t.date.startsWith(String(selYear))), 12), [income, transactions, selYear]);
   const yearlyCatSpend = useMemo(() => getCategorySpend(yearlyTx.filter(t => t.type==='expense'), []), [yearlyTx]);
+
+  const categoryTrendData = useMemo(() => {
+    if (!trendCategory) return [];
+    const now = new Date();
+    return Array.from({ length: 12 }, (_, i) => {
+      const d = new Date(now.getFullYear(), now.getMonth() - (11 - i), 1);
+      const y = d.getFullYear(); const m = d.getMonth() + 1;
+      const start = `${y}-${String(m).padStart(2,'0')}-01`;
+      const end = format(endOfMonth(d), 'yyyy-MM-dd');
+      const amount = transactions.filter(t => t.type==='expense' && t.category===trendCategory && t.date>=start && t.date<=end).reduce((s,t) => s+t.amount, 0);
+      return { month: format(d,'MMM yy'), amount };
+    });
+  }, [trendCategory, transactions]);
 
   const bestSavingMonth = useMemo(() => {
     const m = trends.reduce((best, t) => t.savings > best.savings ? t : best, { savings:0, month:'—' });
@@ -254,6 +268,32 @@ export default function ReportsPage() {
                 <p className={`kpi-value mt-1 ${item.color}`}>{formatCurrency(item.value, sym)}</p>
               </div>
             ))}
+          </div>
+
+          {/* Category Trend Chart */}
+          <div className="card card-p">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="section-title text-base">Category Spend Trend</h3>
+              <select className="form-select text-sm py-1.5 px-3 w-auto" value={trendCategory} onChange={e => setTrendCategory(e.target.value)}>
+                <option value="">Select category…</option>
+                {Array.from(new Set(transactions.filter(t => t.type==='expense' && t.category).map(t => t.category!))).sort().map(c => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+            {!trendCategory ? (
+              <p className="text-sm text-center py-6" style={{ color: 'var(--text-muted)' }}>Select a category above to see its 12-month spend trend</p>
+            ) : (
+              <ResponsiveContainer width="100%" height={200}>
+                <LineChart data={categoryTrendData} margin={{ top:5,right:10,left:0,bottom:0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border-default)" vertical={false}/>
+                  <XAxis dataKey="month" tick={{ fontSize:11, fill:'var(--text-muted)' }} axisLine={false} tickLine={false}/>
+                  <YAxis tick={{ fontSize:11, fill:'var(--text-muted)' }} axisLine={false} tickLine={false} tickFormatter={v=>`${sym}${(v/1000).toFixed(0)}K`}/>
+                  <Tooltip formatter={(v:number) => [formatCurrency(v,sym), trendCategory]} contentStyle={{ borderRadius:'10px',border:'none',fontSize:12 }}/>
+                  <Line type="monotone" dataKey="amount" stroke="#3b82f6" strokeWidth={2} dot={{ r:3 }} activeDot={{ r:5 }}/>
+                </LineChart>
+              </ResponsiveContainer>
+            )}
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
