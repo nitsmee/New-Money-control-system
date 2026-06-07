@@ -8,7 +8,7 @@ import { useAppStore } from '@/lib/store/appStore';
 import {
   LayoutDashboard, TrendingUp, ArrowLeftRight, Repeat, PieChart, Target,
   BarChart3, Settings, Bell, LogOut, Menu, X, ChevronLeft, Sun, Moon,
-  Monitor, Wallet, Landmark
+  Monitor, Wallet, Landmark, Search
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { GlobalSearch } from '@/components/GlobalSearch';
@@ -193,6 +193,28 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     </nav>
   );
 
+  const openSearch = () => window.dispatchEvent(new CustomEvent('mcs-open-search'));
+
+  // Icon-only trigger for compact spots (mobile header, collapsed sidebar).
+  const SearchButton = () => (
+    <button onClick={openSearch} className="btn-icon" title="Search (⌘K)" aria-label="Search">
+      <Search size={16} />
+    </button>
+  );
+
+  // Wider trigger with a keyboard hint for the desktop sidebar.
+  const SearchBar = () => (
+    <button
+      onClick={openSearch}
+      aria-label="Search"
+      className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm border border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors"
+    >
+      <Search size={16} />
+      <span className="flex-1 text-left">Search</span>
+      <span className="text-[10px] font-mono opacity-60 bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded">⌘K</span>
+    </button>
+  );
+
   const ThemeCycler = () => {
     const icons = { light: Sun, dark: Moon, system: Monitor };
     const Icon = icons[theme];
@@ -217,6 +239,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             <Wallet size={16} className="text-white" />
           </div>
           {sidebarOpen && <span className="font-bold text-sm leading-tight tracking-tight">Money Control<br /><span className="text-blue-600 text-xs font-medium">System</span></span>}
+        </div>
+        {/* Search trigger */}
+        <div className={`px-3 pt-3 ${!sidebarOpen ? 'flex justify-center' : ''}`}>
+          {sidebarOpen ? <SearchBar /> : <SearchButton />}
         </div>
         <NavLinks />
         {/* Bottom controls */}
@@ -284,7 +310,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </div>
             <span className="font-bold text-sm">Money Control</span>
           </div>
-          <ThemeCycler />
+          <div className="flex items-center gap-1">
+            <SearchButton />
+            <ThemeCycler />
+          </div>
         </header>
 
         {/* Page content */}

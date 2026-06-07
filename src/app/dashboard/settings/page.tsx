@@ -198,30 +198,30 @@ export default function SettingsPage() {
   const [fetchingRates, setFetchingRates] = useState(false);
   const [savingRates, setSavingRates] = useState(false);
   const [addCcy, setAddCcy] = useState('');
+  // Currencies the user manually added this session (so they show a rate row
+  // even before any account uses them).
+  const [extraCurrencies, setExtraCurrencies] = useState<string[]>([]);
 
   // Keep the editable rate table in sync if settings load/refresh from the store.
   useEffect(() => { setRateForm(settings?.exchange_rates ?? {}); }, [settings?.exchange_rates]);
 
-  // Currencies actually in use: base + every distinct account currency +
-  // every key already present in the saved exchange rates.
-  const currenciesInUse = useMemo(() => {
-    const set = new Set<string>([baseCurrency]);
-    accounts.forEach(a => { if (a.currency) set.add(a.currency); });
-    Object.keys(rateForm).forEach(c => set.add(c));
-    return Array.from(set);
-  }, [accounts, rateForm, baseCurrency]);
+  // Currencies actually relevant to the user: base + every distinct account
+  // currency + anything manually added this session. We deliberately ignore
+  // the (possibly huge) set of keys in exchange_rates so the table stays small.
+  const relevantCurrencies = useMemo(
+    () => Array.from(new Set([baseCurrency, ...accounts.map(a => a.currency || baseCurrency), ...extraCurrencies])),
+    [accounts, baseCurrency, extraCurrencies]
+  );
 
-  // Non-base currencies needing a rate row, plus any the user explicitly added.
+  // Non-base currencies needing a rate row.
   const rateRowCurrencies = useMemo(
-    () => currenciesInUse.filter(c => c !== baseCurrency).sort(),
-    [currenciesInUse, baseCurrency]
+    () => relevantCurrencies.filter(c => c !== baseCurrency).sort(),
+    [relevantCurrencies, baseCurrency]
   );
 
-  // Currencies from the supported list that aren't already shown — offered in
+  // Currencies from the supported list that aren't already relevant — offered in
   // the "Add" dropdown so the user can seed a rate before any account uses it.
-  const addableCurrencies = CURRENCY_CODES.filter(
-    c => c !== baseCurrency && !rateRowCurrencies.includes(c)
-  );
+  const addableCurrencies = CURRENCY_CODES.filter(c => !relevantCurrencies.includes(c));
 
   const persistRates = async (merged: Record<string, number>) => {
     updateSettings({ exchange_rates: merged });
@@ -237,7 +237,13 @@ export default function SettingsPage() {
       const res = await fetch(`/api/fx?base=${encodeURIComponent(baseCurrency)}`);
       const json: { ok: boolean; rates?: Record<string, number>; updated?: string|null; error?: string } = await res.json();
       if (!json.ok || !json.rates) { toast.error(json.error ? `Rate update failed: ${json.error}` : 'Rate update failed'); return; }
-      const merged: Record<string, number> = { ...rateForm, ...json.rates, [baseCurrency]: 1 };
+      const fetched = json.rates;
+      // Prune to relevant currencies only — start with the base at 1, then for
+      // each relevant non-base currency take the freshly fetched rate, falling
+      // back to any existing manual value the fetch didn't cover. This replaces
+      // (and cleans up) any previously bloated exchange_rates map.
+      const merged: Record<string, number> = { [baseCurrency]: 1 };
+      rateRowCurrencies.forEach(ccy => { merged[ccy] = fetched[ccy] ?? rateForm[ccy] ?? 0; });
       setRateForm(merged);
       await persistRates(merged);
       const stamp = json.updated ?? new Date().toISOString();
@@ -251,7 +257,10 @@ export default function SettingsPage() {
   const saveRates = async () => {
     setSavingRates(true);
     try {
-      const merged: Record<string, number> = { ...rateForm, [baseCurrency]: 1 };
+      // Persist only the relevant currencies' rates, not the whole (possibly
+      // bloated) rateForm — base is always pinned to 1.
+      const merged: Record<string, number> = { [baseCurrency]: 1 };
+      rateRowCurrencies.forEach(ccy => { merged[ccy] = rateForm[ccy] ?? 0; });
       await persistRates(merged);
       setRatesUpdatedAt(new Date().toISOString());
       toast.success('Exchange rates saved');
@@ -262,6 +271,7 @@ export default function SettingsPage() {
 
   const addCurrencyRow = () => {
     if (!addCcy) return;
+    setExtraCurrencies(prev => prev.includes(addCcy) ? prev : [...prev, addCcy]);
     setRateForm(prev => ({ ...prev, [addCcy]: prev[addCcy] ?? 0 }));
     setAddCcy('');
   };

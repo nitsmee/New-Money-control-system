@@ -4,11 +4,28 @@ import { useRouter } from 'next/navigation';
 import { Search, X } from 'lucide-react';
 import { useAppStore } from '@/lib/store/appStore';
 
+type SearchGroup =
+  | 'Transactions'
+  | 'Income'
+  | 'Accounts'
+  | 'Budgets'
+  | 'Goals'
+  | 'Categories';
+
+const GROUP_ORDER: readonly SearchGroup[] = [
+  'Transactions',
+  'Income',
+  'Accounts',
+  'Budgets',
+  'Goals',
+  'Categories',
+];
+
 interface SearchResult {
   id: string;
   label: string;
   sub: string;
-  group: 'Transactions' | 'Accounts' | 'Budgets';
+  group: SearchGroup;
   href: string;
 }
 
@@ -19,7 +36,7 @@ export function GlobalSearch() {
   const inputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
 
-  const { transactions, accounts, budgets } = useAppStore();
+  const { transactions, income, accounts, budgets, goals, categories } = useAppStore();
 
   useEffect(() => {
     function handler(e: KeyboardEvent) {
@@ -32,6 +49,15 @@ export function GlobalSearch() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
+  // Allow any visible button (e.g. the header search icon) to open the modal.
+  useEffect(() => {
+    function handler() {
+      setOpen(true);
+    }
+    window.addEventListener('mcs-open-search', handler);
+    return () => window.removeEventListener('mcs-open-search', handler);
+  }, []);
+
   useEffect(() => {
     if (open) {
       setTimeout(() => inputRef.current?.focus(), 50);
@@ -41,16 +67,14 @@ export function GlobalSearch() {
   }, [open]);
 
   const results: SearchResult[] = useMemo(() => {
-    if (!query.trim()) return [];
+    if (query.trim().length < 1) return [];
     const q = query.toLowerCase();
+    const match = (...values: (string | number | null | undefined)[]) =>
+      values.some(v => v != null && String(v).toLowerCase().includes(q));
     const out: SearchResult[] = [];
 
     transactions
-      .filter(tx =>
-        (tx.description ?? '').toLowerCase().includes(q) ||
-        (tx.category ?? '').toLowerCase().includes(q) ||
-        String(tx.amount).includes(q)
-      )
+      .filter(tx => match(tx.description, tx.category, tx.owner_purpose, tx.notes, tx.amount))
       .slice(0, 5)
       .forEach(tx => out.push({
         id: `tx-${tx.id}`,
@@ -60,8 +84,19 @@ export function GlobalSearch() {
         href: '/dashboard/transactions',
       }));
 
+    income
+      .filter(i => match(i.source, i.category, i.description, i.amount))
+      .slice(0, 5)
+      .forEach(i => out.push({
+        id: `inc-${i.id}`,
+        label: i.source ?? i.description ?? i.category ?? 'Income',
+        sub: `${i.date} · ₹${i.amount}`,
+        group: 'Income',
+        href: '/dashboard/income',
+      }));
+
     accounts
-      .filter(a => a.name.toLowerCase().includes(q))
+      .filter(a => match(a.name))
       .slice(0, 5)
       .forEach(a => out.push({
         id: `ac-${a.id}`,
@@ -72,7 +107,7 @@ export function GlobalSearch() {
       }));
 
     budgets
-      .filter(b => b.category.toLowerCase().includes(q))
+      .filter(b => match(b.category))
       .slice(0, 5)
       .forEach(b => out.push({
         id: `bud-${b.id}`,
@@ -82,8 +117,30 @@ export function GlobalSearch() {
         href: '/dashboard/budget',
       }));
 
+    goals
+      .filter(g => match(g.name, g.goal_type))
+      .slice(0, 5)
+      .forEach(g => out.push({
+        id: `goal-${g.id}`,
+        label: g.name,
+        sub: g.goal_type ?? `₹${g.expected_cost}`,
+        group: 'Goals',
+        href: '/dashboard/goals',
+      }));
+
+    categories
+      .filter(c => match(c.name))
+      .slice(0, 5)
+      .forEach(c => out.push({
+        id: `cat-${c.id}`,
+        label: c.name,
+        sub: c.type,
+        group: 'Categories',
+        href: '/dashboard/settings',
+      }));
+
     return out;
-  }, [query, transactions, accounts, budgets]);
+  }, [query, transactions, income, accounts, budgets, goals, categories]);
 
   function handleKey(e: React.KeyboardEvent) {
     if (e.key === 'ArrowDown') {
@@ -104,9 +161,7 @@ export function GlobalSearch() {
 
   if (!open) return null;
 
-  const groups = (['Transactions', 'Accounts', 'Budgets'] as const).filter(g =>
-    results.some(r => r.group === g)
-  );
+  const groups = GROUP_ORDER.filter(g => results.some(r => r.group === g));
 
   let flatIdx = 0;
 
@@ -126,7 +181,7 @@ export function GlobalSearch() {
           <input
             ref={inputRef}
             className="flex-1 bg-transparent outline-none text-sm"
-            placeholder="Search transactions, accounts, budgets..."
+            placeholder="Search transactions, income, accounts, budgets, goals…"
             value={query}
             onChange={e => { setQuery(e.target.value); setActiveIdx(0); }}
             onKeyDown={handleKey}

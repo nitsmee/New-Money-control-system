@@ -136,6 +136,30 @@ export default function DashboardPage() {
   const kpis = useMemo(() => settings ? calculateDashboardKPIs(norm.accounts, norm.income, norm.transactions, displayFixedExpenses, filter, settings) : null, [norm, displayFixedExpenses, filter, settings]);
   const budgetStatus = useMemo(() => calculateBudgetStatus(budgets, norm.transactions, displayFixedExpenses, now, selMonth, selYear), [budgets, norm.transactions, displayFixedExpenses, selMonth, selYear]);
   const trends = useMemo(() => buildMonthlyTrends(norm.income, norm.transactions, 12), [norm.income, norm.transactions]);
+
+  // Net worth at the end of each of the last 12 months, all in the DISPLAY
+  // currency (norm.* is already converted). Mirrors the dashboard net-worth
+  // definition: cash + savings + investment − card debt, excluding family/shared.
+  const netWorthTrend = useMemo(() => {
+    const today = new Date();
+    return Array.from({ length: 12 }, (_, i) => {
+      // last day of the month, i months ago (i=11 oldest ... 0 = current month)
+      const d = new Date(today.getFullYear(), today.getMonth() - (11 - i) + 1, 0);
+      const cutoff = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const incTo = norm.income.filter(x => x.date <= cutoff);
+      const txTo = norm.transactions.filter(t => t.date <= cutoff);
+      const bals = calculateAccountBalances(norm.accounts, incTo, txTo);
+      let nw = 0;
+      bals.forEach(b => {
+        if (!shown(b)) return;
+        if (b.is_credit_card) { nw -= (b.outstanding ?? 0); return; }
+        const role = accountRole(b.account);
+        if (role === 'family') return;            // exclude family/shared (matches dashboard net worth)
+        nw += b.balance;                           // cash + savings + investment
+      });
+      return { month: d.toLocaleString('default', { month: 'short' }) + ' ' + String(d.getFullYear()).slice(2), netWorth: Math.round(nw) };
+    });
+  }, [norm]);
   const catSpend = useMemo(() => getCategorySpend(
     norm.transactions.filter(t => t.date.startsWith(period)),
     categories.map(c => ({ name: c.name, color: c.color }))
@@ -270,6 +294,11 @@ export default function DashboardPage() {
   const momSavDelta = kpis?.mom_savings_delta ?? 0;
   const momNetDelta = (kpis?.mom_income_delta ?? 0) - (kpis?.mom_expense_delta ?? 0) - (kpis?.mom_savings_delta ?? 0);
   const savingsRate = kpis?.savings_rate ?? 0;
+
+  // Net-worth trend caption: latest value and change vs 12 months ago.
+  const nwCurrent = netWorthTrend[netWorthTrend.length - 1]?.netWorth ?? 0;
+  const nwYearAgo = netWorthTrend[0]?.netWorth ?? 0;
+  const nwChange = nwCurrent - nwYearAgo;
 
   // ---- Card definitions (value + the detail panel each opens) ----
   const cards: { label: string; value: number; tone: 'pos' | 'neg' | 'plain'; sub: string; detail: DetailData }[] = [
@@ -560,6 +589,32 @@ export default function DashboardPage() {
                 ))}
               </div>
             </>
+          )}
+        </div>
+      </div>
+
+      {/* Net Worth Trend */}
+      <div className="card card-p animate-fade-in-up">
+        <h3 className="section-title text-base mb-1">Net Worth Trend</h3>
+        <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>End of month · last 12 months</p>
+        <ResponsiveContainer width="100%" height={220}>
+          <AreaChart data={netWorthTrend} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+            <defs>
+              <linearGradient id="netWorthGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#10b981" stopOpacity={0.25} /><stop offset="95%" stopColor="#10b981" stopOpacity={0} /></linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--border-default)" vertical={false} />
+            <XAxis dataKey="month" tick={{ fontSize: 11, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fontSize: 11, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} tickFormatter={v => `${sym}${(v / 1000).toFixed(0)}K`} />
+            <Tooltip formatter={(v: number) => [formatCurrency(v, sym), 'Net worth']} contentStyle={{ borderRadius: '10px', border: 'none', boxShadow: 'var(--shadow-lg)', fontSize: 12 }} />
+            <Area type="monotone" dataKey="netWorth" name="Net worth" stroke="#10b981" fill="url(#netWorthGrad)" strokeWidth={2} dot={false} />
+          </AreaChart>
+        </ResponsiveContainer>
+        <div className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
+          Now: <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{formatCurrency(nwCurrent, sym)}</span>
+          {nwChange !== 0 && (
+            <span className={`ml-2 font-medium ${nwChange > 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+              {nwChange > 0 ? '▲' : '▼'} {formatCurrency(Math.abs(nwChange), sym)} since last year
+            </span>
           )}
         </div>
       </div>
