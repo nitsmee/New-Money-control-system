@@ -60,6 +60,13 @@ export default function TransactionsPage() {
   const [filterMonth, setFilterMonth] = useState(new Date().getMonth() + 1);
   const [filterYear, setFilterYear] = useState(new Date().getFullYear());
   const [filterType, setFilterType] = useState<TransactionType | 'all'>('all');
+  // Extra filters + sorting
+  const [filterCategory, setFilterCategory] = useState('');
+  const [filterAccount, setFilterAccount] = useState('');
+  const [filterOwner, setFilterOwner] = useState('');
+  const [search, setSearch] = useState('');
+  const [sortKey, setSortKey] = useState<'date' | 'amount'>('date');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
   // Bulk selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -85,7 +92,15 @@ export default function TransactionsPage() {
   const base = settings?.currency ?? 'INR';
   const rates = settings?.exchange_rates;
   const [displayCur] = useDisplayCurrency(base);
+  const symD = currencySymbol(displayCur);
   const curOf = (id?: string | null) => accounts.find(a => a.id === id)?.currency || base;
+
+  const clearFilters = () => { setSearch(''); setFilterCategory(''); setFilterAccount(''); setFilterOwner(''); setFilterType('all'); };
+  const toggleSort = (key: 'date' | 'amount') => {
+    if (sortKey === key) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
+    else { setSortKey(key); setSortDir('desc'); }
+  };
+  const sortArrow = (key: 'date' | 'amount') => (sortKey === key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '');
 
   const cfg = getTypeConfig(form.type);
   const activeAccounts = useMemo(() => accounts.filter(a => a.is_active), [accounts]);
@@ -94,28 +109,60 @@ export default function TransactionsPage() {
   const expenseCategories = useMemo(() => categories.filter(c => (c.type === 'expense' || c.type === 'transfer' || c.type === 'saving' || c.type === 'all') && c.is_active), [categories]);
   const activeOwners = useMemo(() => owners.filter(o => o.is_active), [owners]);
 
+  // Distinct values actually present in the data — power the filter dropdowns.
+  const filterCategories = useMemo(() => Array.from(new Set(transactions.map(t => t.category).filter(Boolean) as string[])).sort(), [transactions]);
+  const filterOwners = useMemo(() => Array.from(new Set(transactions.map(t => t.owner_purpose).filter(Boolean) as string[])).sort(), [transactions]);
+
+  // Amount of a transaction converted into the display currency (source currency
+  // = its from-account, falling back to to-account). Used for sums + sorting.
+  const convDisp = useMemo(() => {
+    const curById = (id?: string | null) => accounts.find(a => a.id === id)?.currency || base;
+    return (t: Transaction) => convertAmount(t.amount, curById(t.from_account_id ?? t.to_account_id), displayCur, rates, base);
+  }, [accounts, displayCur, rates, base]);
+
   const filtered = useMemo(() => {
     const start = `${filterYear}-${String(filterMonth).padStart(2, '0')}-01`;
     const end = format(endOfMonth(new Date(filterYear, filterMonth - 1)), 'yyyy-MM-dd');
-    return transactions
-      .filter(t => t.date >= start && t.date <= end && (filterType === 'all' || t.type === filterType))
-      .sort((a, b) => b.date.localeCompare(a.date));
-  }, [transactions, filterMonth, filterYear, filterType]);
+    const q = search.trim().toLowerCase();
+    const rows = transactions.filter(t => {
+      if (t.date < start || t.date > end) return false;
+      if (filterType !== 'all' && t.type !== filterType) return false;
+      if (filterCategory && t.category !== filterCategory) return false;
+      if (filterAccount && t.from_account_id !== filterAccount && t.to_account_id !== filterAccount) return false;
+      if (filterOwner && t.owner_purpose !== filterOwner) return false;
+      if (q) {
+        const hay = `${t.description ?? ''} ${t.category ?? ''} ${t.owner_purpose ?? ''} ${t.notes ?? ''} ${t.amount}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+    rows.sort((a, b) => {
+      const cmp = sortKey === 'amount' ? convDisp(a) - convDisp(b) : a.date.localeCompare(b.date);
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+    return rows;
+  }, [transactions, filterMonth, filterYear, filterType, filterCategory, filterAccount, filterOwner, search, sortKey, sortDir, convDisp]);
 
-  // Totals sum across possibly-mixed account currencies, so each transaction is
-  // converted into the display currency first. When everything is one currency
-  // (and/or no rates) convertAmount returns the amount unchanged.
+  // Summary of the currently-filtered rows (all amounts converted to display
+  // currency). Drives the count + per-type sums + filtered total.
   const totals = useMemo(() => {
-    const curById = (id?: string | null) => accounts.find(a => a.id === id)?.currency || base;
-    const sumIn = (type: TransactionType) => filtered
-      .filter(t => t.type === type)
-      .reduce((s, t) => s + convertAmount(t.amount, curById(t.from_account_id ?? t.to_account_id), displayCur, rates, base), 0);
-    return {
-      expense: sumIn('expense'),
-      saving: sumIn('saving'),
-      cc_payment: sumIn('credit_card_payment'),
-    };
-  }, [filtered, accounts, displayCur, rates, base]);
+    let expense = 0, saving = 0, cc_payment = 0, transfer = 0, total = 0;
+    for (const t of filtered) {
+      const v = convDisp(t);
+      total += v;
+      if (t.type === 'expense') expense += v;
+      else if (t.type === 'saving') saving += v;
+      else if (t.type === 'credit_card_payment') cc_payment += v;
+      else if (t.type === 'transfer') transfer += v;
+    }
+    return { count: filtered.length, expense, saving, cc_payment, transfer, total };
+  }, [filtered, convDisp]);
+
+  // Sum of the rows the user has ticked (across all data, not just this page).
+  const selectedSum = useMemo(
+    () => transactions.filter(t => selectedIds.has(t.id)).reduce((s, t) => s + convDisp(t), 0),
+    [transactions, selectedIds, convDisp]
+  );
 
   const allVisibleSelected = filtered.length > 0 && filtered.every(t => selectedIds.has(t.id));
 
@@ -290,8 +337,13 @@ export default function TransactionsPage() {
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="card card-p space-y-3">
         <div className="flex flex-wrap items-center gap-2">
+          <input
+            type="text" value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Search description, category, amount…"
+            className="form-input text-sm py-1.5 px-3 flex-1 min-w-[180px]"
+          />
           <select className="form-select text-sm py-1.5 px-3 w-auto" value={filterMonth} onChange={e => setFilterMonth(+e.target.value)}>
             {MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
           </select>
@@ -302,11 +354,31 @@ export default function TransactionsPage() {
             <option value="all">All Types</option>
             {TRANSACTION_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
           </select>
+          <select className="form-select text-sm py-1.5 px-3 w-auto" value={filterCategory} onChange={e => setFilterCategory(e.target.value)}>
+            <option value="">All Categories</option>
+            {filterCategories.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+          <select className="form-select text-sm py-1.5 px-3 w-auto" value={filterAccount} onChange={e => setFilterAccount(e.target.value)}>
+            <option value="">All Accounts</option>
+            {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+          <select className="form-select text-sm py-1.5 px-3 w-auto" value={filterOwner} onChange={e => setFilterOwner(e.target.value)}>
+            <option value="">All Owners</option>
+            {filterOwners.map(o => <option key={o} value={o}>{o}</option>)}
+          </select>
+          {(search || filterCategory || filterAccount || filterOwner || filterType !== 'all') && (
+            <button onClick={clearFilters} className="btn-md btn-secondary text-xs py-1.5 px-3">Clear filters</button>
+          )}
         </div>
-        <div className="flex items-center gap-4 text-xs" style={{ color: 'var(--text-muted)' }}>
-          <span>Expense: <strong className="amount-negative">{formatCurrency(totals.expense, currencySymbol(displayCur))}</strong></span>
-          <span>Savings: <strong className="text-blue-600">{formatCurrency(totals.saving, currencySymbol(displayCur))}</strong></span>
-          <span>CC Paid: <strong className="text-amber-600">{formatCurrency(totals.cc_payment, currencySymbol(displayCur))}</strong></span>
+
+        {/* Summary of filtered results */}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs pt-2 border-t border-slate-100 dark:border-slate-700" style={{ color: 'var(--text-muted)' }}>
+          <span><strong style={{ color: 'var(--text-primary)' }}>{totals.count}</strong> transaction{totals.count === 1 ? '' : 's'}</span>
+          {totals.expense > 0 && <span>Expense: <strong className="amount-negative">{formatCurrency(totals.expense, symD)}</strong></span>}
+          {totals.saving > 0 && <span>Savings: <strong className="text-blue-600">{formatCurrency(totals.saving, symD)}</strong></span>}
+          {totals.cc_payment > 0 && <span>CC Paid: <strong className="text-amber-600">{formatCurrency(totals.cc_payment, symD)}</strong></span>}
+          {totals.transfer > 0 && <span>Transfers: <strong>{formatCurrency(totals.transfer, symD)}</strong></span>}
+          <span>Filtered total: <strong style={{ color: 'var(--text-primary)' }}>{formatCurrency(totals.total, symD)}</strong></span>
           <span className="opacity-70">(in {displayCur})</span>
         </div>
       </div>
@@ -314,7 +386,9 @@ export default function TransactionsPage() {
       {/* Bulk action bar */}
       {selectedIds.size > 0 && (
         <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 text-sm">
-          <span className="font-medium text-blue-800 dark:text-blue-200">{selectedIds.size} selected</span>
+          <span className="font-medium text-blue-800 dark:text-blue-200">
+            {selectedIds.size} selected · sum <strong>{formatCurrency(selectedSum, symD)}</strong>
+          </span>
           <button
             onClick={handleBulkDelete}
             disabled={bulkDeleting}
@@ -492,12 +566,17 @@ export default function TransactionsPage() {
                   title="Select all visible"
                 />
               </th>
-              <th>Date</th><th>Description</th><th>Type</th><th>Category</th><th>Owner</th><th>From</th><th>To</th><th className="text-right">Amount</th><th className="text-right">Actions</th>
+              <th className="cursor-pointer select-none hover:text-blue-600" onClick={() => toggleSort('date')} title="Sort by date">Date{sortArrow('date')}</th>
+              <th>Description</th><th>Type</th><th>Category</th><th>Owner</th><th>From</th><th>To</th>
+              <th className="text-right cursor-pointer select-none hover:text-blue-600" onClick={() => toggleSort('amount')} title="Sort by amount">Amount{sortArrow('amount')}</th>
+              <th className="text-right">Actions</th>
             </tr></thead>
             <tbody>
               {filtered.length === 0 && (
                 <tr><td colSpan={10} className="text-center py-10 text-sm" style={{ color: 'var(--text-muted)' }}>
-                  No transactions for this period. Click "Add Transaction" to start.
+                  {search || filterCategory || filterAccount || filterOwner || filterType !== 'all'
+                    ? 'No transactions match your filters. Try clearing some.'
+                    : 'No transactions for this period. Click "Add Transaction" to start.'}
                 </td></tr>
               )}
               {filtered.map(tx => {
