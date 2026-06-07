@@ -6,7 +6,7 @@ import { Account, Category, Owner, UserSettings } from '@/types';
 import toast from 'react-hot-toast';
 import { Plus, Pencil, Trash2, X, Check, Settings, Database, User, Tag, Wallet, Download, Upload, RefreshCw, Coins } from 'lucide-react';
 import Papa from 'papaparse';
-import { currencyLabel, CURRENCY_CODES } from '@/lib/utils/calculations';
+import { currencyLabel, currencySymbol, CURRENCY_CODES } from '@/lib/utils/calculations';
 import { CurrencySelect } from '@/components/CurrencySelect';
 
 type Tab = 'accounts'|'categories'|'owners'|'preferences';
@@ -541,16 +541,12 @@ export default function SettingsPage() {
             <h3 className="section-title text-base pt-2 border-t border-slate-100 dark:border-slate-700">Currency</h3>
             <div className="grid grid-cols-2 gap-3">
               <div className="form-group">
-                <label className="form-label">Currency Code</label>
-                <select className="form-select" value={prefForm.currency} onChange={e => { const map: Record<string,string> = { INR:'₹', USD:'$', EUR:'€', GBP:'£', JPY:'¥', AED:'د.إ', SGD:'S$' }; setPrefForm({...prefForm, currency:e.target.value, currency_symbol:map[e.target.value]??'₹'}); }}>
-                  <option value="INR">INR — Indian Rupee</option>
-                  <option value="USD">USD — US Dollar</option>
-                  <option value="EUR">EUR — Euro</option>
-                  <option value="GBP">GBP — British Pound</option>
-                  <option value="JPY">JPY — Japanese Yen</option>
-                  <option value="AED">AED — UAE Dirham</option>
-                  <option value="SGD">SGD — Singapore Dollar</option>
-                </select>
+                <label className="form-label">Base Currency</label>
+                <CurrencySelect
+                  value={prefForm.currency}
+                  onChange={code => setPrefForm({ ...prefForm, currency: code, currency_symbol: currencySymbol(code).trim() })}
+                  options={CURRENCY_CODES}
+                />
               </div>
               <div className="form-group">
                 <label className="form-label">Symbol Preview</label>

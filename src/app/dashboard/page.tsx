@@ -4,9 +4,10 @@ import { useAppStore } from '@/lib/store/appStore';
 import {
   calculateAccountBalances, calculateDashboardKPIs, calculateBudgetStatus,
   buildMonthlyTrends, getCategorySpend, generateAlerts, formatCurrency, formatDate, accountRole, safeDueDate,
-  currencySymbol, currencyLabel, normalizeAmounts, YEAR_OPTIONS
+  currencySymbol, normalizeAmounts, YEAR_OPTIONS
 } from '@/lib/utils/calculations';
 import { useDisplayCurrency } from '@/lib/useDisplayCurrency';
+import { CurrencySelect } from '@/components/CurrencySelect';
 import { runAutoProcess } from '@/lib/utils/autoProcess';
 import { runAutoProcessIncome } from '@/lib/utils/autoProcessIncome';
 import { createClient } from '@/lib/supabase/client';
@@ -393,15 +394,7 @@ export default function DashboardPage() {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           {currenciesInUse.length > 1 && (
-            <select
-              className="form-select text-sm py-2 px-3 pr-8 w-auto"
-              value={displayCur}
-              onChange={e => setDisplayCur(e.target.value)}
-              title="Display all totals in this currency"
-              aria-label="Display currency"
-            >
-              {currenciesInUse.map(c => <option key={c} value={c}>{currencyLabel(c)}</option>)}
-            </select>
+            <CurrencySelect value={displayCur} onChange={setDisplayCur} options={currenciesInUse} />
           )}
           <select className="form-select text-sm py-2 px-3 pr-8 w-auto" value={selMonth} onChange={e => { setSelMonth(+e.target.value); setDateFilter({ ...filter, month: +e.target.value }); }}>
             {MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
