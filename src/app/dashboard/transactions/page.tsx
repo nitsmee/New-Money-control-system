@@ -1,5 +1,5 @@
 'use client';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useAppStore } from '@/lib/store/appStore';
 import { createClient } from '@/lib/supabase/client';
 import { Transaction, TransactionType, TRANSACTION_TYPES } from '@/types';
@@ -155,6 +155,22 @@ export default function TransactionsPage() {
     });
     return rows;
   }, [transactions, fromDate, toDate, filterType, filterCategory, filterAccount, filterOwner, search, sortKey, sortDir, convDisp]);
+
+  // Client-side pagination of the rendered rows. `filtered` stays the full
+  // filtered set (so summary sums + bulk operations cover everything); only the
+  // table body maps over `paged`. A very large pageSize means "All".
+  const [pageSize, setPageSize] = useState(50);
+  const [page, setPage] = useState(1);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const paged = useMemo(
+    () => (pageSize >= 100000 ? filtered : filtered.slice((page - 1) * pageSize, page * pageSize)),
+    [filtered, page, pageSize]
+  );
+
+  // Reset to page 1 whenever the filtered set or page size changes.
+  useEffect(() => {
+    setPage(1);
+  }, [fromDate, toDate, filterType, filterCategory, filterAccount, filterOwner, search, sortKey, sortDir, pageSize]);
 
   // Summary of the currently-filtered rows (all amounts converted to display
   // currency). Drives the count + per-type sums + filtered total.
@@ -582,7 +598,7 @@ export default function TransactionsPage() {
                   checked={allVisibleSelected}
                   onChange={toggleSelectAll}
                   className="w-4 h-4 accent-blue-600"
-                  title="Select all visible"
+                  title="Select all filtered rows (across all pages)"
                 />
               </th>
               <th className="cursor-pointer select-none hover:text-blue-600" onClick={() => toggleSort('date')} title="Sort by date">Date{sortArrow('date')}</th>
@@ -598,7 +614,7 @@ export default function TransactionsPage() {
                     : 'No transactions for this period. Click "Add Transaction" to start.'}
                 </td></tr>
               )}
-              {filtered.map(tx => {
+              {paged.map(tx => {
                 const fromAcc = accounts.find(a => a.id === tx.from_account_id);
                 const toAcc = accounts.find(a => a.id === tx.to_account_id);
                 return (
@@ -634,6 +650,47 @@ export default function TransactionsPage() {
               })}
             </tbody>
           </table>
+        </div>
+
+        {/* Pagination bar */}
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-t border-slate-100 dark:border-slate-700 text-sm" style={{ color: 'var(--text-muted)' }}>
+          <span>
+            Showing{' '}
+            <strong style={{ color: 'var(--text-primary)' }}>
+              {filtered.length === 0 ? 0 : (page - 1) * pageSize + 1}
+              –{Math.min(page * pageSize, filtered.length)}
+            </strong>{' '}
+            of <strong style={{ color: 'var(--text-primary)' }}>{filtered.length}</strong>
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              disabled={page <= 1}
+              className="btn-md btn-secondary text-xs py-1.5 px-3 disabled:opacity-50"
+            >
+              Prev
+            </button>
+            <span>Page <strong style={{ color: 'var(--text-primary)' }}>{page}</strong> of {totalPages}</span>
+            <button
+              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages}
+              className="btn-md btn-secondary text-xs py-1.5 px-3 disabled:opacity-50"
+            >
+              Next
+            </button>
+            <select
+              className="form-select text-sm py-1.5 px-2 w-auto"
+              value={pageSize}
+              onChange={e => setPageSize(+e.target.value)}
+              title="Rows per page"
+            >
+              <option value={25}>25 / page</option>
+              <option value={50}>50 / page</option>
+              <option value={100}>100 / page</option>
+              <option value={200}>200 / page</option>
+              <option value={100000}>All</option>
+            </select>
+          </div>
         </div>
       </div>
 
