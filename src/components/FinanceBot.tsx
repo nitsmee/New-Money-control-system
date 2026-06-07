@@ -11,7 +11,8 @@ import { useAppStore } from '@/lib/store/appStore';
 import { createClient } from '@/lib/supabase/client';
 import {
   calculateAccountBalances, calculateDashboardKPIs, calculateBudgetStatus,
-  formatCurrency, getMonthTotals, currencySymbol, accountRole, CURRENCY_SYMBOLS,
+  formatCurrency, getMonthTotals, currencySymbol, accountRole, convertAmount,
+  CURRENCY_SYMBOLS,
 } from '@/lib/utils/calculations';
 import type {
   Account, Transaction, Income, Category, Goal, Budget, FixedExpense,
@@ -387,6 +388,27 @@ function answerHelp(q: string): string | null {
   return null;
 }
 
+// Maps common currency WORDS onto their ISO code so "convert 1000 baht to
+// rupees" works as well as "1000 THB to INR". Codes themselves are matched
+// separately against CURRENCY_SYMBOLS.
+const CURRENCY_WORDS: Record<string, string> = {
+  rupee: 'INR', rupees: 'INR', rs: 'INR', inr: 'INR',
+  baht: 'THB', thb: 'THB',
+  dollar: 'USD', dollars: 'USD', usd: 'USD', buck: 'USD', bucks: 'USD',
+  euro: 'EUR', euros: 'EUR', eur: 'EUR',
+  pound: 'GBP', pounds: 'GBP', gbp: 'GBP', quid: 'GBP', sterling: 'GBP',
+  yen: 'JPY', jpy: 'JPY',
+  dirham: 'AED', dirhams: 'AED', aed: 'AED',
+};
+
+// Resolve a single currency token (an ISO code or a word like "baht") to its
+// upper-cased ISO code, but only if we actually know a symbol for it.
+function resolveCurrencyToken(token: string): string | null {
+  const t = token.toLowerCase();
+  const code = CURRENCY_WORDS[t] ?? t.toUpperCase();
+  return CURRENCY_SYMBOLS[code] ? code : null;
+}
+
 // Detect a currency *code* asked about (e.g. "how much in THB"). Matches a
 // known code that is actually used by one of the user's accounts, so a plain
 // word never gets mistaken for a currency. Returns the upper-cased code.
@@ -603,6 +625,138 @@ function answerRecentList(q: string, data: BotData): string | null {
   return `🧾 Your last ${sorted.length} ${noun}${sorted.length === 1 ? '' : 's'}:\n${rows.join('\n')}\n\nTotal shown: ${fc(sum(sorted))}`;
 }
 
+// "my savings", "how much have I saved", "savings this month", "last year
+// saving". With NO period → the SAVINGS BALANCE (sum of savings-role account
+// balances, each in its own currency, plus a combined total in the base/
+// display currency). With a period → the sum of saving-type transactions in
+// that period, converted to the base currency.
+function answerSavings(q: string, data: BotData): string | null {
+  // "savings rate" is a concept (handled by the KB), not a balance question.
+  if (/\bsavings? rate\b/.test(q)) return null;
+  const range = parseDateRange(q);
+  // "savings"/"saved"/"set aside" clearly refer to savings on their own. Bare
+  // present-tense "save" ("how much can I save") only counts with a period
+  // (e.g. "how much did I save in June"), so it doesn't hijack capacity
+  // questions better served elsewhere.
+  const nounSignal = /\b(savings?|saved|set aside|put aside)\b/.test(q);
+  const verbSignal = range !== null && /\bsave\b/.test(q);
+  if (!nounSignal && !verbSignal) return null;
+  // If a specific account is named with no period (e.g. "my HDFC savings
+  // balance"), let the dedicated balance handler report that one account.
+  if (!range && matchAccount(q, data.accounts)) return null;
+
+  const base = data.settings?.currency ?? 'INR';
+  const baseSym = currencySymbol(base);
+  const rates = data.settings?.exchange_rates;
+  const fcBase = (n: number) => formatCurrency(n, baseSym);
+
+  // --- Period flow: how much did I SAVE (saving-type transactions) ---
+  if (range) {
+    const savings = data.transactions.filter(t => t.type === 'saving' && t.date >= range.start && t.date <= range.end);
+    if (!savings.length) return `🏦 You haven't recorded any savings ${range.label}.`;
+    const accCur = new Map(data.accounts.map(a => [a.id, (a.currency || base).toUpperCase()]));
+    const total = savings.reduce((s, t) => {
+      const cur = accCur.get(t.from_account_id ?? t.to_account_id ?? '') ?? base;
+      return s + convertAmount(t.amount, cur, base, rates, base);
+    }, 0);
+    const n = savings.length;
+    return `🏦 You saved ${fcBase(total)} ${range.label} across ${n} saving entr${n === 1 ? 'y' : 'ies'}.`;
+  }
+
+  // --- Balance flow: how much do I HAVE saved (savings-role accounts) ---
+  const savingsAccts = data.balances.filter(b =>
+    b.account.is_active && !b.is_credit_card &&
+    (accountRole(b.account) === 'savings' || b.account.include_in_goal_savings));
+  if (!savingsAccts.length) {
+    return `🏦 You don't have any savings accounts set up yet. Mark an account as savings (or "Include in goal savings") in **Settings → Accounts** and it'll show up here.`;
+  }
+  const lines = savingsAccts.map(b => {
+    const sym = currencySymbol(b.account.currency || base);
+    return `${b.account.name} ${formatCurrency(b.balance, sym)}`;
+  });
+  const total = savingsAccts.reduce((s, b) =>
+    s + convertAmount(b.balance, (b.account.currency || base).toUpperCase(), base, rates, base), 0);
+  return `🏦 Your savings: ${fcBase(total)} total — ${lines.join(', ')}.`;
+}
+
+// Currency rates + conversions. Handles:
+//   • "exchange rates" / "what are the rates"  → list every known rate.
+//   • "convert 1000 thb to inr" / "500 baht in rupees" → compute a conversion.
+//   • "thb to inr rate" (pair, no amount) → show the rate both directions.
+function answerCurrency(q: string, data: BotData): string | null {
+  const base = (data.settings?.currency ?? 'INR').toUpperCase();
+  const baseSym = currencySymbol(base);
+  const rates = data.settings?.exchange_rates ?? {};
+
+  const wantsRates = /\b(exchange rates?|currency rates?|conversion rates?|forex|what are the rates|fx rates?)\b/.test(q);
+
+  // A readable bidirectional line for a single currency vs the base.
+  const rateLine = (code: string): string | null => {
+    if (code === base) return null;
+    const r = rates[code];
+    if (!r) return null;
+    const sym = currencySymbol(code);
+    const fwd = formatCurrency(r, baseSym); // 1 unit of `code` in base
+    const rev = (1 / r).toLocaleString('en-IN', { maximumFractionDigits: 4 });
+    return `• 1 ${code} = ${fwd}  (${baseSym}1 = ${sym}${rev})`;
+  };
+
+  // --- Conversion: "<amount> <from> to/in <to>" ---
+  // Grab the first number, then the two currency tokens around it.
+  const amountMatch = q.match(/(\d[\d,]*(?:\.\d+)?)/);
+  const tokenRe = /\b([a-z]{3,8})\b/g;
+  const tokens: string[] = [];
+  let tm: RegExpExecArray | null;
+  while ((tm = tokenRe.exec(q)) !== null) {
+    const code = resolveCurrencyToken(tm[1]);
+    if (code) tokens.push(code);
+  }
+  const distinct = [...new Set(tokens)];
+
+  if (amountMatch && distinct.length >= 2) {
+    const amount = parseFloat(amountMatch[1].replace(/,/g, ''));
+    const from = distinct[0], to = distinct[1];
+    if (!isNaN(amount)) {
+      const haveFrom = from === base || !!rates[from];
+      const haveTo = to === base || !!rates[to];
+      if (!haveFrom || !haveTo) {
+        const missing = !haveFrom ? from : to;
+        return `💱 I don't have an exchange rate for ${missing} yet. Add it in **Settings → Currencies & Exchange Rates → Update rates automatically**.`;
+      }
+      const result = convertAmount(amount, from, to, rates, base);
+      const fromSym = currencySymbol(from), toSym = currencySymbol(to);
+      // The single-pair rate that explains the maths: 1 `from` in `to`.
+      const perUnit = convertAmount(1, from, to, rates, base);
+      const perUnitStr = perUnit.toLocaleString('en-IN', { maximumFractionDigits: 4 });
+      return `💱 ${fromSym}${amount.toLocaleString('en-IN', { maximumFractionDigits: 2 })} = ${formatCurrency(result, toSym)} (at 1 ${from} = ${toSym}${perUnitStr}).`;
+    }
+  }
+
+  // --- Pair with no amount: "thb to inr", "inr to thb rate" ---
+  if (!wantsRates && distinct.length >= 2) {
+    const a = distinct[0], b = distinct[1];
+    const foreign = a === base ? b : a; // the non-base side
+    const line = rateLine(foreign);
+    if (line) return `💱 Exchange rate:\n${line}`;
+    return `💱 I don't have an exchange rate for ${foreign} yet. Add it in **Settings → Currencies & Exchange Rates → Update rates automatically**.`;
+  }
+
+  // --- List all rates ---
+  if (wantsRates) {
+    // Currencies in use by accounts, plus any extra ones that have a rate set.
+    const used = new Set(data.accounts.map(a => (a.currency || base).toUpperCase()).filter(Boolean));
+    const codes = new Set<string>([...used, ...Object.keys(rates)]);
+    codes.delete(base);
+    const lines = [...codes].map(rateLine).filter((l): l is string => l !== null);
+    if (!lines.length) {
+      return `💱 No exchange rates are set yet. Add them in **Settings → Currencies & Exchange Rates → Update rates automatically** and I'll convert between your currencies.`;
+    }
+    return `💱 Exchange rates (base ${base}):\n${lines.join('\n')}`;
+  }
+
+  return null;
+}
+
 function answerDataQuery(q: string, data: BotData): string {
   const sym = data.settings?.currency_symbol ?? '₹';
   const fc = (n: number) => formatCurrency(n, sym);
@@ -678,6 +832,56 @@ function findKB(q: string): KBEntry | null {
   for (const e of KNOWLEDGE_BASE) if (e.keywords.some(kw => q.includes(kw))) return e;
   return null;
 }
+
+// A STRONG "explain how this is computed" signal — "how is X calculated",
+// "formula for X", "explain X", "definition of X". This clearly wants the
+// concept, so it takes priority even over data handlers like net worth.
+function isStrongExplainIntent(q: string): boolean {
+  return /\b(how is|how are|how does|how do|explain|formula|calculated|definition|define|what does .* mean|meaning of|why is|why does)\b/.test(q);
+}
+
+// A BROADER "tell me what this is" signal — "what is X", "tell me about X",
+// "the X card", "X card". Checked AFTER the data handlers so a precise
+// question ("what is my net worth") still returns the number, while a pure
+// concept lookup ("what's savings rate", "the safe to spend card") reaches the
+// knowledge base (and, when no KB entry fits, the LLM).
+function isExplainIntent(q: string): boolean {
+  return isStrongExplainIntent(q)
+    || /\b(tell me about|what is|what's)\b/.test(q)
+    || /\bcard\b/.test(q);
+}
+
+// Strip filler words so a phrase like "explain the safe to spend card"
+// reduces to "safe to spend", then fuzzy-match a KB entry whose title or any
+// keyword is contained in (or contains) the cleaned query. Falls back to the
+// strict keyword match first so existing exact phrasings are unaffected.
+const KB_FILLER = new Set([
+  'the', 'a', 'an', 'card', 'my', 'me', 'explain', 'what', 'whats', "what's",
+  'is', 'are', 'does', 'do', 'mean', 'means', 'meaning', 'of', 'tell', 'about',
+  'how', 'show', 'calculated', 'calculate', 'definition', 'define', 'value',
+  'this', 'that', 'please', 'pls', 'and', 'for', 'to', 'in', 'on', 'why',
+]);
+function findKBFuzzy(q: string): KBEntry | null {
+  const exact = findKB(q);
+  if (exact) return exact;
+  const cleaned = q
+    .replace(/[?.!,]/g, ' ')
+    .split(/\s+/)
+    .filter(w => w && !KB_FILLER.has(w))
+    .join(' ')
+    .trim();
+  if (!cleaned) return null;
+  for (const e of KNOWLEDGE_BASE) {
+    const candidates = [e.title.toLowerCase(), ...e.keywords];
+    for (const c of candidates) {
+      if (!c) continue;
+      // Match either direction: the KB phrase is in the query, or the cleaned
+      // query is in the KB phrase (so "savings rate" ⇄ "rate").
+      if (cleaned.includes(c) || c.includes(cleaned)) return e;
+    }
+  }
+  return null;
+}
 function liveValueFor(kb: KBEntry, data: BotData): string | null {
   const k = data.kpis; if (!k) return null;
   const fc = (n: number) => formatCurrency(n, data.settings?.currency_symbol ?? '₹');
@@ -692,54 +896,90 @@ function liveValueFor(kb: KBEntry, data: BotData): string | null {
   }
 }
 
-// Top-level router. confident=false → caller may try the AI fallback.
-function localAnswer(rawQuery: string, data: BotData, me: UserInfo): { reply: BotReply; confident: boolean } {
+// What kind of answer the local engine produced:
+//   data     — a precise computed answer (counts/sums/balances/savings/
+//              affordability/identity/security/currency). Always instant and
+//              correct; the caller should NOT ask the LLM.
+//   concept  — a knowledge-base explanation. The LLM can phrase it better, so
+//              the caller may prefer the LLM when a key is configured.
+//   fallback — nothing matched. The caller should try the LLM if available.
+type AnswerKind = 'data' | 'concept' | 'fallback';
+
+// Top-level router. Returns a local reply plus a `kind` hint that tells the
+// caller whether to keep the local answer (data) or prefer the LLM when one is
+// configured (concept / fallback). `confident` stays for backwards-compatible
+// callers (true for everything except the bare-capabilities fallback).
+function localAnswer(rawQuery: string, data: BotData, me: UserInfo): { reply: BotReply; confident: boolean; kind: AnswerKind } {
   const q = rawQuery.toLowerCase().trim();
   // A synonym-normalised alternate phrasing, tried as a SECOND chance so it
   // never overrides a query the raw matchers already handle.
   const qn = normalizeQuery(q);
   const fcBase = (n: number) => formatCurrency(n, data.settings?.currency_symbol ?? '₹');
+  const dataReply = (text: string) => ({ reply: { text }, confident: true, kind: 'data' as const });
 
-  const sec = securityRefusal(q); if (sec) return { reply: { text: sec }, confident: true };
-  if (/^(hi|hii|hello|hey|yo|help|menu|what can you do|start)\b/.test(q)) return { reply: { text: CAPABILITIES }, confident: true };
+  const sec = securityRefusal(q); if (sec) return dataReply(sec);
+  if (/^(hi|hii|hello|hey|yo|help|menu|what can you do|start)\b/.test(q)) return { reply: { text: CAPABILITIES }, confident: true, kind: 'data' };
 
-  const id = answerIdentity(q, me); if (id) return { reply: { text: id }, confident: true };
-  const help = answerHelp(q); if (help) return { reply: { text: help }, confident: true };
-  const afford = answerAffordability(q, data); if (afford) return { reply: { text: afford }, confident: true };
+  const id = answerIdentity(q, me); if (id) return dataReply(id);
+  const help = answerHelp(q); if (help) return dataReply(help);
+  const afford = answerAffordability(q, data); if (afford) return dataReply(afford);
 
-  const explainSignal = /\b(how is|how are|how does|how do|explain|formula|calculated|definition|what does .* mean|why is|why does)\b/.test(q);
-  if (explainSignal) { const kb = findKB(q); if (kb) return { reply: { value: liveValueFor(kb, data) ?? undefined, entry: kb }, confident: true }; }
+  // Currency conversion / exchange rates — precise, always local.
+  const currency = answerCurrency(q, data) ?? answerCurrency(qn, data); if (currency) return dataReply(currency);
 
-  // Smarter, naturally-phrased intents (try raw, then normalised).
-  const worth = answerNetWorth(q, data) ?? answerNetWorth(qn, data); if (worth) return { reply: { text: worth }, confident: true };
-  const budgetHealth = answerBudgetHealth(q, data) ?? answerBudgetHealth(qn, data); if (budgetHealth) return { reply: { text: budgetHealth }, confident: true };
-  const topSpend = answerTopSpending(q, data) ?? answerTopSpending(qn, data); if (topSpend) return { reply: { text: topSpend }, confident: true };
+  // Savings (balance or period) — the main fix. Precise, always local.
+  const savings = answerSavings(q, data) ?? answerSavings(qn, data); if (savings) return dataReply(savings);
+
+  // STRONG explain ("how is X calculated", "explain X", "formula for X") wins
+  // even over data handlers — it clearly wants the concept, not the number.
+  if (isStrongExplainIntent(q)) {
+    const kb = findKBFuzzy(q) ?? findKBFuzzy(qn);
+    if (kb) return { reply: { value: liveValueFor(kb, data) ?? undefined, entry: kb }, confident: true, kind: 'concept' };
+  }
+
+  // Smarter, naturally-phrased data intents. These run BEFORE the broader
+  // explain branch so a precise question like "what is my net worth" returns
+  // the number, not the formula. Their signals are specific enough not to
+  // swallow a concept query.
+  const worth = answerNetWorth(q, data) ?? answerNetWorth(qn, data); if (worth) return dataReply(worth);
+  const budgetHealth = answerBudgetHealth(q, data) ?? answerBudgetHealth(qn, data); if (budgetHealth) return dataReply(budgetHealth);
+  const topSpend = answerTopSpending(q, data) ?? answerTopSpending(qn, data); if (topSpend) return dataReply(topSpend);
+
+  // BROADER explain intent ("what is X", "the X card") → knowledge base
+  // (fuzzy). A CONCEPT answer, so the caller may prefer the LLM when one is
+  // configured.
+  if (isExplainIntent(q)) {
+    const kb = findKBFuzzy(q) ?? findKBFuzzy(qn);
+    if (kb) return { reply: { value: liveValueFor(kb, data) ?? undefined, entry: kb }, confident: true, kind: 'concept' };
+  }
 
   const hasDate = parseDateRange(q) !== null;
   const intent = classifyIntent(q);
 
-  const count = answerEntityCount(q, data, hasDate); if (count) return { reply: { text: count }, confident: true };
+  const count = answerEntityCount(q, data, hasDate); if (count) return dataReply(count);
   // Detect the balance intent on either phrasing, but answer from the RAW
   // query so account names (which may contain synonym words) match cleanly.
-  if (intent === 'balance' || classifyIntent(qn) === 'balance') return { reply: { text: answerBalance(q, data, fcBase) }, confident: true };
-  if (hasDate) return { reply: { text: answerDataQuery(q, data) }, confident: true };
+  if (intent === 'balance' || classifyIntent(qn) === 'balance') return dataReply(answerBalance(q, data, fcBase));
+  if (hasDate) return dataReply(answerDataQuery(q, data));
 
   // "last 10 transactions" / "recent expenses" → N most recent, all-time
-  const recent = answerRecentList(q, data) ?? answerRecentList(qn, data); if (recent) return { reply: { text: recent }, confident: true };
+  const recent = answerRecentList(q, data) ?? answerRecentList(qn, data); if (recent) return dataReply(recent);
 
-  const kb = findKB(q); if (kb) return { reply: { value: liveValueFor(kb, data) ?? undefined, entry: kb }, confident: true };
+  // A plain concept question that didn't trip the explain trigger (e.g. just
+  // "savings rate") — still a KB concept.
+  const kb = findKB(q); if (kb) return { reply: { value: liveValueFor(kb, data) ?? undefined, entry: kb }, confident: true, kind: 'concept' };
 
   const dataSignals = intent !== 'unknown' || /\b(transaction|transactions|expense|expenses|income|saving|savings|spent|earned|paid)\b/.test(q);
-  if (dataSignals) return { reply: { text: answerDataQuery(q, data) }, confident: true };
+  if (dataSignals) return dataReply(answerDataQuery(q, data));
 
   // Second chance: the normalised phrasing may expose data signals the raw
   // query hid (e.g. "my spendings" → "expense", "earnings" → "income").
   const dataSignalsN = classifyIntent(qn) !== 'unknown' || /\b(transaction|transactions|expense|expenses|income|saving|savings|spent|earned|paid)\b/.test(qn);
-  if (dataSignalsN) return { reply: { text: answerDataQuery(qn, data) }, confident: true };
+  if (dataSignalsN) return dataReply(answerDataQuery(qn, data));
 
-  // Nothing matched locally → still show the helpful capabilities text, and
-  // confident=false so the optional AI fallback (if configured) can try.
-  return { reply: { text: CAPABILITIES }, confident: false };
+  // Nothing matched locally → show the helpful capabilities text. kind is
+  // 'fallback' so the optional AI (if configured) gets a chance to answer.
+  return { reply: { text: CAPABILITIES }, confident: false, kind: 'fallback' };
 }
 
 // ============================================================
@@ -747,23 +987,122 @@ function localAnswer(rawQuery: string, data: BotData, me: UserInfo): { reply: Bo
 // ============================================================
 
 function buildContext(data: BotData, me: UserInfo): string {
-  const sym = data.settings?.currency_symbol ?? '₹';
+  const base = (data.settings?.currency ?? 'INR').toUpperCase();
+  const sym = currencySymbol(base);
   const fc = (n: number) => formatCurrency(n, sym);
+  const rates = data.settings?.exchange_rates ?? {};
   const k = data.kpis;
+  const now = new Date();
   const L: string[] = [];
-  L.push(`Today: ${fmt(new Date())}`);
+
+  // --- Identity & currency ---
+  L.push(`Today's date: ${fmt(now)}`);
   if (me.name) L.push(`User name: ${me.name}`);
   if (me.email) L.push(`User email: ${me.email}`);
-  L.push(`Currency: ${data.settings?.currency ?? 'INR'} (${sym})`);
-  if (k) L.push(`This month: income ${fc(k.total_income)}, true income ${fc(k.true_income)}, expenses ${fc(k.total_expense)}, savings ${fc(k.total_savings)}, savings rate ${k.savings_rate.toFixed(1)}%, net cashflow ${fc(k.net_cashflow)}, safe to spend ${fc(k.safe_to_spend)}, spendable ${fc(k.spendable_balance)}, CC outstanding ${fc(k.total_cc_outstanding)}.`);
+  L.push(`Base currency: ${base} (${sym}) — all amounts below are in ${base} unless a currency code is shown.`);
+  L.push(`Display currency: ${base} (${sym})`);
+  const rateCodes = new Set<string>([
+    ...data.accounts.map(a => (a.currency || base).toUpperCase()),
+    ...Object.keys(rates),
+  ]);
+  rateCodes.delete(base);
+  const rateLines = [...rateCodes]
+    .filter(c => rates[c])
+    .map(c => `1 ${c} = ${fc(rates[c])}`);
+  L.push(`Exchange rates: ${rateLines.length ? rateLines.join('; ') : 'none set'}`);
+
+  // --- Period summaries (income / true income / expenses / savings / net) ---
+  const periodLine = (label: string, month: number, year: number) => {
+    const t = getMonthTotals(data.income, data.transactions, month, year);
+    const net = t.income - t.expense - t.savings;
+    return `  - ${label}: income ${fc(t.income)}, true income ${fc(t.trueIncome)}, expenses ${fc(t.expense)}, savings ${fc(t.savings)}, net ${fc(net)}`;
+  };
+  const last = subMonths(now, 1);
+  const sumRange = (start: string, end: string) => {
+    const inc = data.income.filter(i => i.date >= start && i.date <= end);
+    const income = inc.reduce((s, i) => s + i.amount, 0);
+    const trueIncome = inc.filter(i => i.include_in_true_income).reduce((s, i) => s + i.amount, 0);
+    const expense = data.transactions.filter(t => t.type === 'expense' && t.date >= start && t.date <= end).reduce((s, t) => s + t.amount, 0);
+    const savings = data.transactions.filter(t => t.type === 'saving' && t.date >= start && t.date <= end).reduce((s, t) => s + t.amount, 0);
+    return { income, trueIncome, expense, savings };
+  };
+  const yrLine = (label: string, year: number) => {
+    const t = sumRange(`${year}-01-01`, `${year}-12-31`);
+    const net = t.income - t.expense - t.savings;
+    return `  - ${label}: income ${fc(t.income)}, true income ${fc(t.trueIncome)}, expenses ${fc(t.expense)}, savings ${fc(t.savings)}, net ${fc(net)}`;
+  };
+  L.push('Period summaries:');
+  L.push(periodLine('This month', now.getMonth() + 1, now.getFullYear()));
+  L.push(periodLine('Last month', last.getMonth() + 1, last.getFullYear()));
+  L.push(yrLine('This year', now.getFullYear()));
+  L.push(yrLine('Last year', now.getFullYear() - 1));
+  {
+    const allInc = data.income.reduce((s, i) => s + i.amount, 0);
+    const allTrue = data.income.filter(i => i.include_in_true_income).reduce((s, i) => s + i.amount, 0);
+    const allExp = data.transactions.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+    const allSav = data.transactions.filter(t => t.type === 'saving').reduce((s, t) => s + t.amount, 0);
+    L.push(`  - All-time: income ${fc(allInc)}, true income ${fc(allTrue)}, expenses ${fc(allExp)}, savings ${fc(allSav)}, net ${fc(allInc - allExp - allSav)}`);
+  }
+
+  // --- Top expense categories (this month, this year) ---
+  const monthStart = fmt(startOfMonth(now)), monthEnd = fmt(endOfMonth(now));
+  const yearStart = fmt(startOfYear(now)), yearEnd = fmt(endOfYear(now));
+  const topCatStr = (start: string, end: string) => {
+    const exp = data.transactions.filter(t => t.type === 'expense' && t.date >= start && t.date <= end) as unknown as Entry[];
+    const top = topCategories(exp, 6);
+    return top.length ? top.map(c => `${c.category} ${fc(c.amount)}`).join(', ') : 'none';
+  };
+  L.push(`Top expense categories this month: ${topCatStr(monthStart, monthEnd)}`);
+  L.push(`Top expense categories this year: ${topCatStr(yearStart, yearEnd)}`);
+
+  // --- Live KPIs ---
+  if (k) {
+    const investTotal = data.balances
+      .filter(b => b.account.is_active && !b.is_credit_card && accountRole(b.account) === 'investment')
+      .reduce((s, b) => s + b.balance, 0);
+    const netWorth = k.spendable_balance + k.savings_balance + investTotal - k.total_cc_outstanding;
+    L.push(`Live KPIs: safe to spend ${fc(k.safe_to_spend)}, savings rate ${k.savings_rate.toFixed(1)}%, net cashflow ${fc(k.net_cashflow)}, spendable ${fc(k.spendable_balance)}, savings balance ${fc(k.savings_balance)}, CC outstanding ${fc(k.total_cc_outstanding)}, net worth ${fc(netWorth)}.`);
+  }
+
+  // --- Accounts (each in its own currency) ---
   const active = data.balances.filter(b => b.account.is_active);
-  if (active.length) { L.push(`Accounts (${active.length}):`); active.forEach(b => L.push(`  - ${b.account.name} (${b.account.account_type}${b.is_credit_card ? ', credit card' : ''}): ${b.is_credit_card ? `${fc(b.outstanding ?? 0)} owed` : fc(b.balance)}`)); }
+  if (active.length) {
+    L.push(`Accounts (${active.length}):`);
+    active.forEach(b => {
+      const cur = (b.account.currency || base).toUpperCase();
+      const accSym = currencySymbol(cur);
+      const amt = b.is_credit_card ? `${formatCurrency(b.outstanding ?? 0, accSym)} outstanding` : `${formatCurrency(b.balance, accSym)} balance`;
+      L.push(`  - ${b.account.name} (${b.account.account_type}, ${cur}${b.is_credit_card ? ', credit card' : ''}): ${amt}`);
+    });
+  }
   const pool = active.filter(b => !b.is_credit_card && b.account.include_in_goal_savings).reduce((s, b) => s + b.balance, 0);
   L.push(`Goal savings pool: ${fc(pool)}`);
-  if (data.budgets.length) L.push(`Budgets: ${data.budgets.map(b => `${b.category} ${fc(b.monthly_budget)}`).join(', ')}`);
-  if (data.goals.length) L.push(`Goals: ${data.goals.map(g => `${g.name} target ${fc(g.expected_cost)}`).join(', ')}`);
-  const recent = [...data.transactions].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 15);
-  if (recent.length) { L.push('Recent transactions:'); recent.forEach(t => L.push(`  - ${t.date} ${t.type} ${fc(t.amount)} ${t.category ?? ''} ${t.description ?? ''}`.trim())); }
+
+  // --- Budgets (this month, with actuals & status) ---
+  if (data.budgets.length) {
+    const statuses = calculateBudgetStatus(data.budgets, data.transactions, data.fixedExpenses, now, now.getMonth() + 1, now.getFullYear());
+    if (statuses.length) {
+      L.push('Budgets (this month):');
+      statuses.forEach(s => L.push(`  - ${s.category}: limit ${fc(s.monthly_budget)}, spent ${fc(s.actual_till_date)}, status ${s.status}`));
+    }
+  }
+
+  // --- Goals (target, saved, progress) ---
+  if (data.goals.length) {
+    L.push('Goals:');
+    data.goals.filter(g => g.is_active).forEach(g => {
+      const saved = g.amount_allocated ?? 0;
+      const pct = g.expected_cost > 0 ? Math.min(100, Math.round((saved / g.expected_cost) * 100)) : 100;
+      L.push(`  - ${g.name}: target ${fc(g.expected_cost)}, saved/available ${fc(saved)}, ${pct}% funded`);
+    });
+  }
+
+  // --- Recent transactions ---
+  const recent = [...data.transactions].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 20);
+  if (recent.length) {
+    L.push('Recent 20 transactions:');
+    recent.forEach(t => L.push(`  - ${t.date} ${t.type} ${fc(t.amount)} ${t.category ?? ''} ${t.description ?? ''}`.trim()));
+  }
   L.push(`Totals: ${data.transactions.length} transactions, ${data.income.length} income entries, ${data.goals.length} goals, ${data.budgets.length} budgets.`);
   return L.join('\n');
 }
@@ -931,15 +1270,19 @@ export function FinanceBot() {
     setInput('');
     setMessages(prev => [...prev, { role: 'user', text: trimmed }]);
 
-    const { reply, confident } = localAnswer(trimmed, data, me);
+    const { reply, kind } = localAnswer(trimmed, data, me);
 
-    // Confident local answer, or AI known-unavailable → answer locally.
-    if (confident || aiAvailable === false) {
+    // Precise computed answers (counts/sums/balances/savings/affordability/
+    // identity/security/currency) are exact and instant — never call the LLM.
+    // Concept explanations and unmatched questions go to the LLM when one is
+    // configured (aiAvailable true, or unknown/null so we try once); when no
+    // key is set (aiAvailable === false) we use the local reply.
+    if (kind === 'data' || aiAvailable === false) {
       setMessages(prev => [...prev, { role: 'bot', ...reply }]);
       return;
     }
 
-    // Try the optional AI fallback.
+    // Try the optional AI for concept/open-ended questions.
     setBusy(true);
     setMessages(prev => [...prev, { role: 'bot', thinking: true }]);
     try {
