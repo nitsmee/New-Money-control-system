@@ -18,17 +18,49 @@ interface ColumnMap {
   date: string;
   amount: string;
   description: string;
+  category: string;
 }
 
-function parseDate(val: string): string | null {
+type DateFormat = 'auto' | 'dmy' | 'mdy' | 'ymd';
+
+function parseDate(val: string, fmt: DateFormat): string | null {
   const v = val.trim();
   if (!v) return null;
-  // Try YYYY-MM-DD first (avoid UTC shift by treating as local)
-  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v; // already correct format
-  // Try DD/MM/YYYY
-  const dmy = v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
-  // Fallback: parse with Date but extract local parts to avoid UTC offset
+  // Helper: build & validate a YYYY-MM-DD from local parts (no UTC shift).
+  const build = (year: number, month: number, day: number): string | null => {
+    if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+    const ymd = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const d = new Date(year, month - 1, day);
+    if (d.getFullYear() !== year || d.getMonth() !== month - 1 || d.getDate() !== day) return null;
+    return ymd;
+  };
+  // YYYY-MM-DD (explicit or matched): validate it's a real date.
+  if (fmt === 'ymd' || /^\d{4}-\d{2}-\d{2}$/.test(v)) {
+    const m = v.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (m) return build(Number(m[1]), Number(m[2]), Number(m[3]));
+    return null;
+  }
+  // Slash/dash dates with three numeric parts and a 4-digit year last.
+  const parts = v.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  if (parts) {
+    const a = Number(parts[1]);
+    const b = Number(parts[2]);
+    const year = Number(parts[3]);
+    let day: number;
+    let month: number;
+    if (fmt === 'dmy') {
+      day = a; month = b;
+    } else if (fmt === 'mdy') {
+      month = a; day = b;
+    } else {
+      // auto: a>12 must be day (dmy); b>12 must be mdy; else default dmy (Indian app default).
+      if (a > 12) { day = a; month = b; }
+      else if (b > 12) { month = a; day = b; }
+      else { day = a; month = b; }
+    }
+    return build(year, month, day);
+  }
+  // Fallback: parse with Date but extract local parts to avoid UTC offset.
   const d = new Date(v);
   if (!isNaN(d.getTime())) {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -39,7 +71,9 @@ function parseDate(val: string): string | null {
 interface MappedRow {
   date: string;
   amount: number;
+  signed: number;
   description: string;
+  category: string;
 }
 
 export function CSVImportModal({ isOpen, onClose, onImported }: Props) {
@@ -47,9 +81,11 @@ export function CSVImportModal({ isOpen, onClose, onImported }: Props) {
   const [fileName, setFileName] = useState('');
   const [rows, setRows] = useState<Record<string, string>[]>([]);
   const [columns, setColumns] = useState<string[]>([]);
-  const [colMap, setColMap] = useState<ColumnMap>({ date: '', amount: '', description: '' });
+  const [colMap, setColMap] = useState<ColumnMap>({ date: '', amount: '', description: '', category: '' });
   const [accountId, setAccountId] = useState('');
   const [txType, setTxType] = useState<'expense' | 'income'>('expense');
+  const [dateFormat, setDateFormat] = useState<'auto' | 'dmy' | 'mdy' | 'ymd'>('auto');
+  const [signedAmounts, setSignedAmounts] = useState(false);
   const [mappedRows, setMappedRows] = useState<MappedRow[]>([]);
   const [progress, setProgress] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
@@ -72,7 +108,8 @@ export function CSVImportModal({ isOpen, onClose, onImported }: Props) {
         const dateCol = cols.find(c => /date/i.test(c)) ?? '';
         const amtCol = cols.find(c => /amount|amt|value|debit|credit/i.test(c)) ?? '';
         const descCol = cols.find(c => /desc|narr|particular|note|detail/i.test(c)) ?? '';
-        setColMap({ date: dateCol, amount: amtCol, description: descCol });
+        const catCol = cols.find(c => /categ|type|tag/i.test(c)) ?? '';
+        setColMap({ date: dateCol, amount: amtCol, description: descCol, category: catCol });
         setStep('map');
       },
     });
@@ -89,13 +126,15 @@ export function CSVImportModal({ isOpen, onClose, onImported }: Props) {
   function buildMapped() {
     const mapped: MappedRow[] = [];
     for (const row of rows) {
-      const dateStr = parseDate(row[colMap.date] ?? '');
+      const dateStr = parseDate(row[colMap.date] ?? '', dateFormat);
       const amt = parseFloat(row[colMap.amount] ?? '0');
       if (!dateStr || isNaN(amt)) continue;
       mapped.push({
         date: dateStr,
         amount: Math.abs(amt),
+        signed: amt,
         description: row[colMap.description] ?? '',
+        category: colMap.category ? (row[colMap.category] ?? '') : '',
       });
     }
     return mapped;
@@ -133,45 +172,69 @@ export function CSVImportModal({ isOpen, onClose, onImported }: Props) {
     let skipped = 0;
     const batchSize = 50;
 
-    // Build deduped rows for expense imports
-    const rowsToImport = txType === 'expense'
-      ? mappedRows.filter(r => {
-          const isDup = existingTransactions.some(t => t.date === r.date && t.amount === r.amount);
-          if (isDup) { skipped++; return false; }
-          return true;
-        })
-      : mappedRows;
+    // Helpers to build insert payloads (shared by signed & unsigned paths).
+    const toExpenseRow = (r: MappedRow) => ({
+      date: r.date,
+      amount: r.amount,
+      description: r.description,
+      type: 'expense' as const,
+      from_account_id: accountId,
+      category: r.category || 'Import',
+      period: r.date.slice(0, 7),
+      user_id: user.id,
+    });
+    const toIncomeRow = (r: MappedRow) => ({
+      date: r.date,
+      amount: r.amount,
+      description: r.description,
+      to_account_id: accountId,
+      category: r.category || 'Import',
+      owner_purpose: 'Personal',
+      include_in_true_income: true,
+      user_id: user.id,
+    });
 
-    for (let i = 0; i < rowsToImport.length; i += batchSize) {
-      const batch = rowsToImport.slice(i, i + batchSize);
-      if (txType === 'expense') {
-        const rows = batch.map(r => ({
-          date: r.date,
-          amount: r.amount,
-          description: r.description,
-          type: 'expense' as const,
-          from_account_id: accountId,
-          category: 'Import',
-          period: r.date.slice(0, 7),
-          user_id: user.id,
-        }));
-        const { error } = await supabase.from('transactions').insert(rows);
-        if (!error) imported += batch.length;
+    // Determine, per row, whether it is an expense (true) or income (false).
+    // When signedAmounts is on, sign decides; otherwise the single txType selector decides.
+    const expenseRows: MappedRow[] = [];
+    const incomeRows: MappedRow[] = [];
+    for (const r of mappedRows) {
+      let asExpense: boolean;
+      if (signedAmounts) {
+        if (r.signed === 0) continue; // skip zero-amount rows
+        asExpense = r.signed < 0;
       } else {
-        const rows = batch.map(r => ({
-          date: r.date,
-          amount: r.amount,
-          description: r.description,
-          to_account_id: accountId,
-          category: 'Import',
-          owner_purpose: 'Personal',
-          include_in_true_income: true,
-          user_id: user.id,
-        }));
-        const { error } = await supabase.from('income').insert(rows);
-        if (!error) imported += batch.length;
+        asExpense = txType === 'expense';
       }
-      setProgress(Math.round(((i + batchSize) / rowsToImport.length) * 100));
+      if (asExpense) {
+        // Dedup expenses against existing transactions (date + amount + description).
+        const isDup = existingTransactions.some(t =>
+          t.date === r.date && t.amount === r.amount && (t.description ?? '') === (r.description ?? '')
+        );
+        if (isDup) { skipped++; continue; }
+        expenseRows.push(r);
+      } else {
+        incomeRows.push(r);
+      }
+    }
+
+    const total = expenseRows.length + incomeRows.length;
+    let processed = 0;
+
+    for (let i = 0; i < expenseRows.length; i += batchSize) {
+      const batch = expenseRows.slice(i, i + batchSize);
+      const { error } = await supabase.from('transactions').insert(batch.map(toExpenseRow));
+      if (!error) imported += batch.length;
+      processed += batch.length;
+      setProgress(total > 0 ? Math.round((processed / total) * 100) : 100);
+    }
+
+    for (let i = 0; i < incomeRows.length; i += batchSize) {
+      const batch = incomeRows.slice(i, i + batchSize);
+      const { error } = await supabase.from('income').insert(batch.map(toIncomeRow));
+      if (!error) imported += batch.length;
+      processed += batch.length;
+      setProgress(total > 0 ? Math.round((processed / total) * 100) : 100);
     }
 
     // Refresh the store so imported rows appear immediately (no manual reload).
@@ -186,7 +249,7 @@ export function CSVImportModal({ isOpen, onClose, onImported }: Props) {
     setStep('upload');
     setRows([]);
     setFileName('');
-  }, [mappedRows, txType, accountId, onImported, onClose]);
+  }, [mappedRows, txType, accountId, signedAmounts, onImported, onClose]);
 
   function handleClose() {
     onClose();
@@ -253,9 +316,9 @@ export function CSVImportModal({ isOpen, onClose, onImported }: Props) {
 
               {/* Column mappings */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {(['date', 'amount', 'description'] as const).map(field => (
+                {(['date', 'amount', 'description', 'category'] as const).map(field => (
                   <div key={field} className="form-group">
-                    <label className="form-label capitalize">{field} column {field !== 'description' && <span className="text-red-400">*</span>}</label>
+                    <label className="form-label capitalize">{field} column {field !== 'description' && field !== 'category' && <span className="text-red-400">*</span>}</label>
                     <select
                       className="form-select"
                       value={colMap[field]}
@@ -279,12 +342,40 @@ export function CSVImportModal({ isOpen, onClose, onImported }: Props) {
                 </div>
                 <div className="form-group">
                   <label className="form-label">Transaction Type</label>
-                  <select className="form-select" value={txType} onChange={e => setTxType(e.target.value as 'expense' | 'income')}>
+                  <select
+                    className="form-select"
+                    value={txType}
+                    onChange={e => setTxType(e.target.value as 'expense' | 'income')}
+                    disabled={signedAmounts}
+                  >
                     <option value="expense">Expense</option>
                     <option value="income">Income</option>
                   </select>
                 </div>
+                <div className="form-group">
+                  <label className="form-label">Date format</label>
+                  <select
+                    className="form-select"
+                    value={dateFormat}
+                    onChange={e => setDateFormat(e.target.value as 'auto' | 'dmy' | 'mdy' | 'ymd')}
+                  >
+                    <option value="auto">Auto-detect</option>
+                    <option value="dmy">DD/MM/YYYY</option>
+                    <option value="mdy">MM/DD/YYYY</option>
+                    <option value="ymd">YYYY-MM-DD</option>
+                  </select>
+                </div>
               </div>
+
+              {/* Signed amounts */}
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={signedAmounts}
+                  onChange={e => setSignedAmounts(e.target.checked)}
+                />
+                <span>Amounts are signed (negative = money out, positive = money in)</span>
+              </label>
 
               {/* Preview rows */}
               {colMap.date && colMap.amount && (

@@ -1,8 +1,8 @@
 'use client';
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { useAppStore } from '@/lib/store/appStore';
 import { calculateAccountBalances, calculateBudgetStatus, calculateDashboardKPIs, generateAlerts, formatCurrency, safeDueDate } from '@/lib/utils/calculations';
-import { AlertTriangle, CheckCircle, Info, XCircle, Bell, TrendingDown, CreditCard, Calendar, Shield } from 'lucide-react';
+import { AlertTriangle, CheckCircle, Info, XCircle, Bell, TrendingDown, CreditCard, Calendar, Shield, X } from 'lucide-react';
 import Link from 'next/link';
 
 const SEVERITY_ICON = {
@@ -17,6 +17,9 @@ const SEVERITY_STYLE = {
   info: 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800 text-blue-800 dark:text-blue-300',
   success: 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300',
 };
+
+const DISMISSED_KEY = 'mcs_dismissed_alerts';
+const SNOOZE_MS = 86400000; // 24h
 
 export default function AlertsPage() {
   const { accounts, income, transactions, budgets, fixedExpenses, settings } = useAppStore();
@@ -69,9 +72,56 @@ export default function AlertsPage() {
   }, [balances, transactions, fixedExpenses, settings, sym, today, kpis]);
 
   const allAlerts = [...alerts, ...extraAlerts];
-  const errors = allAlerts.filter(a => a.severity === 'error');
-  const warnings = allAlerts.filter(a => a.severity === 'warning');
-  const infos = allAlerts.filter(a => a.severity === 'info');
+
+  // --- Client-side dismiss/snooze (24h, localStorage-backed, no DB) ---
+  // Map of alertId -> epoch ms when it was dismissed. Entries older than 24h
+  // are pruned on read so those alerts reappear automatically.
+  const [dismissed, setDismissed] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(DISMISSED_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Record<string, number>;
+      const now = Date.now();
+      const fresh: Record<string, number> = {};
+      let pruned = false;
+      for (const [id, ts] of Object.entries(parsed)) {
+        if (typeof ts === 'number' && now - ts < SNOOZE_MS) fresh[id] = ts;
+        else pruned = true;
+      }
+      setDismissed(fresh);
+      // Persist the pruned map so stale entries don't linger in storage.
+      if (pruned) localStorage.setItem(DISMISSED_KEY, JSON.stringify(fresh));
+    } catch {
+      // Corrupt/blocked storage — start with an empty snooze map.
+      setDismissed({});
+    }
+  }, []);
+
+  const dismissAlert = (id: string) => {
+    setDismissed(prev => {
+      const next = { ...prev, [id]: Date.now() };
+      try { localStorage.setItem(DISMISSED_KEY, JSON.stringify(next)); } catch { /* storage unavailable */ }
+      return next;
+    });
+  };
+
+  const showAllAlerts = () => {
+    setDismissed({});
+    try { localStorage.removeItem(DISMISSED_KEY); } catch { /* storage unavailable */ }
+  };
+
+  const now = Date.now();
+  const visibleAlerts = allAlerts.filter(a => {
+    const ts = dismissed[a.id];
+    return ts === undefined || now - ts >= SNOOZE_MS;
+  });
+  const hasSnoozed = allAlerts.length > 0 && visibleAlerts.length === 0;
+
+  const errors = visibleAlerts.filter(a => a.severity === 'error');
+  const warnings = visibleAlerts.filter(a => a.severity === 'warning');
+  const infos = visibleAlerts.filter(a => a.severity === 'info');
 
   return (
     <div className="space-y-5">
@@ -95,8 +145,17 @@ export default function AlertsPage() {
         </div>
       )}
 
+      {hasSnoozed && (
+        <div className="card card-p text-center py-16">
+          <Bell size={48} className="mx-auto mb-4 text-blue-400"/>
+          <h2 className="text-xl font-bold mb-2 text-blue-600">All alerts snoozed for 24h</h2>
+          <p className="text-sm mb-4" style={{ color:'var(--text-muted)' }}>You&apos;ve dismissed every active alert. They&apos;ll reappear automatically after 24 hours.</p>
+          <button onClick={showAllAlerts} className="btn btn-sm btn-secondary">Show all</button>
+        </div>
+      )}
+
       {/* Summary Row */}
-      {allAlerts.length > 0 && (
+      {visibleAlerts.length > 0 && (
         <div className="grid grid-cols-3 gap-3">
           {[
             { label:'Critical', count:errors.length, color:'text-red-500', bg:'bg-red-50 dark:bg-red-900/20', Icon:XCircle },
@@ -116,7 +175,7 @@ export default function AlertsPage() {
 
       {/* Alert List */}
       <div className="space-y-3">
-        {allAlerts.map(alert => {
+        {visibleAlerts.map(alert => {
           const Icon = SEVERITY_ICON[alert.severity];
           return (
             <div key={alert.id} className={`card border p-4 ${SEVERITY_STYLE[alert.severity]}`}>
@@ -131,6 +190,13 @@ export default function AlertsPage() {
                     </Link>
                   )}
                 </div>
+                <button
+                  onClick={() => dismissAlert(alert.id)}
+                  aria-label="Dismiss alert"
+                  className="flex-shrink-0 -mt-1 -mr-1 p-1 rounded opacity-50 hover:opacity-100 hover:bg-black/5 dark:hover:bg-white/10 transition-opacity"
+                >
+                  <X size={16}/>
+                </button>
               </div>
             </div>
           );

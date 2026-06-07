@@ -207,11 +207,29 @@ function parseDateRange(q: string, today = new Date()): DateRange | null {
 
   const mon = q.match(/\b(january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sept|sep|october|oct|november|nov|december|dec)\b\.?\s*(\d{4})?/);
   if (mon) {
-    const mIdx = MONTHS[mon[1]]; const yr = mon[2] ? +mon[2] : (mIdx > t.getMonth() ? t.getFullYear() - 1 : t.getFullYear());
-    const s = new Date(yr, mIdx, 1); return { start: fmt(s), end: fmt(endOfMonth(s)), label: format(s, 'MMMM yyyy') };
+    const token = mon[1];
+    const hasYear = !!mon[2];
+    // "may" is also a common modal verb ("how much may I spend"). Only treat
+    // it as the month May when it has a year or an explicit date preposition.
+    const ambiguousMay = token === 'may' && !hasYear && !/\b(in|of|during|for|month of)\s+may\b/.test(q);
+    if (!ambiguousMay) {
+      const mIdx = MONTHS[token];
+      const yr = hasYear ? +mon[2] : (mIdx > t.getMonth() ? t.getFullYear() - 1 : t.getFullYear());
+      const s = new Date(yr, mIdx, 1);
+      return { start: fmt(s), end: fmt(endOfMonth(s)), label: format(s, 'MMMM yyyy') };
+    }
   }
-  const yrOnly = q.match(/\b(20\d{2})\b/);
-  if (yrOnly) { const yr = +yrOnly[1]; return { start: `${yr}-01-01`, end: `${yr}-12-31`, label: String(yr) }; }
+  // Bare 4-digit year — but not when it's actually an amount ("2020 rupees", "₹2020").
+  const yrMatch = q.match(/\b(20\d{2})\b/);
+  if (yrMatch) {
+    const idx = yrMatch.index ?? 0;
+    const after = q.slice(idx + 4, idx + 14);
+    const before = q.slice(Math.max(0, idx - 2), idx);
+    if (!/^\s*(rupees?|rs|inr|bucks|dollars?)\b/.test(after) && !/[₹$]/.test(before)) {
+      const yr = +yrMatch[1];
+      return { start: `${yr}-01-01`, end: `${yr}-12-31`, label: String(yr) };
+    }
+  }
   return null;
 }
 const daysInRange = (r: DateRange) => Math.round((new Date(r.end).getTime() - new Date(r.start).getTime()) / 86400000) + 1;

@@ -248,8 +248,8 @@ export default function SettingsPage() {
                       <td>{a.is_active?<span className="badge badge-green text-[10px]">Active</span>:<span className="badge badge-gray text-[10px]">Inactive</span>}</td>
                       <td>
                         <div className="flex justify-end gap-1">
-                          <button onClick={() => openEditAcc(a)} className="btn-icon text-slate-400 hover:text-blue-600"><Pencil size={13}/></button>
-                          <button onClick={() => deleteAcc(a)} className="btn-icon text-slate-400 hover:text-red-600"><Trash2 size={13}/></button>
+                          <button onClick={() => openEditAcc(a)} aria-label="Edit account" className="btn-icon text-slate-400 hover:text-blue-600"><Pencil size={13}/></button>
+                          <button onClick={() => deleteAcc(a)} aria-label="Delete account" className="btn-icon text-slate-400 hover:text-red-600"><Trash2 size={13}/></button>
                         </div>
                       </td>
                     </tr>
@@ -263,7 +263,7 @@ export default function SettingsPage() {
               <div className="card w-full max-w-md animate-fade-in-up">
                 <div className="flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-700">
                   <h2 className="text-lg font-semibold">{editingAcc?'Edit Account':'Add Account'}</h2>
-                  <button onClick={() => setShowAccForm(false)} className="btn-icon"><X size={18}/></button>
+                  <button onClick={() => setShowAccForm(false)} aria-label="Close" className="btn-icon"><X size={18}/></button>
                 </div>
                 <div className="p-5 space-y-4">
                   <div className="form-group">
@@ -327,8 +327,8 @@ export default function SettingsPage() {
                       <td>{c.is_active?<span className="badge badge-green text-[10px]">Active</span>:<span className="badge badge-gray text-[10px]">Inactive</span>}</td>
                       <td>
                         <div className="flex justify-end gap-1">
-                          <button onClick={() => openEditCat(c)} className="btn-icon text-slate-400 hover:text-blue-600"><Pencil size={13}/></button>
-                          <button onClick={() => deleteCat(c)} className="btn-icon text-slate-400 hover:text-red-600"><Trash2 size={13}/></button>
+                          <button onClick={() => openEditCat(c)} aria-label="Edit category" className="btn-icon text-slate-400 hover:text-blue-600"><Pencil size={13}/></button>
+                          <button onClick={() => deleteCat(c)} aria-label="Delete category" className="btn-icon text-slate-400 hover:text-red-600"><Trash2 size={13}/></button>
                         </div>
                       </td>
                     </tr>
@@ -342,7 +342,7 @@ export default function SettingsPage() {
               <div className="card w-full max-w-md animate-fade-in-up">
                 <div className="flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-700">
                   <h2 className="text-lg font-semibold">{editingCat?'Edit Category':'Add Category'}</h2>
-                  <button onClick={() => setShowCatForm(false)} className="btn-icon"><X size={18}/></button>
+                  <button onClick={() => setShowCatForm(false)} aria-label="Close" className="btn-icon"><X size={18}/></button>
                 </div>
                 <div className="p-5 space-y-4">
                   <div className="form-group"><label className="form-label">Name *</label><input type="text" className="form-input" placeholder="Category name" value={catForm.name} onChange={e => setCatForm({...catForm, name:e.target.value})}/></div>
@@ -393,7 +393,7 @@ export default function SettingsPage() {
                   {!o.is_active && <span className="badge badge-gray text-[10px]">Inactive</span>}
                 </div>
                 <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button onClick={() => openEditOwner(o)} className="btn-icon text-slate-400 hover:text-blue-600"><Pencil size={13}/></button>
+                  <button onClick={() => openEditOwner(o)} aria-label="Edit owner" className="btn-icon text-slate-400 hover:text-blue-600"><Pencil size={13}/></button>
                 </div>
               </div>
             ))}
@@ -403,7 +403,7 @@ export default function SettingsPage() {
               <div className="card w-full max-w-md animate-fade-in-up">
                 <div className="flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-700">
                   <h2 className="text-lg font-semibold">{editingOwner?'Edit Owner':'Add Owner'}</h2>
-                  <button onClick={() => setShowOwnerForm(false)} className="btn-icon"><X size={18}/></button>
+                  <button onClick={() => setShowOwnerForm(false)} aria-label="Close" className="btn-icon"><X size={18}/></button>
                 </div>
                 <div className="p-5 space-y-4">
                   <div className="form-group"><label className="form-label">Name *</label><input type="text" className="form-input" placeholder="e.g. Business" value={ownerForm.name} onChange={e => setOwnerForm({...ownerForm, name:e.target.value})}/></div>
@@ -506,9 +506,14 @@ export default function SettingsPage() {
               <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-lg text-sm space-y-1">
                 <p className="font-medium">Data Statistics</p>
                 <p style={{ color:'var(--text-muted)' }}>{income.length} income entries</p>
+                <p style={{ color:'var(--text-muted)' }}>{recurringIncome.length} recurring income</p>
                 <p style={{ color:'var(--text-muted)' }}>{transactions.length} transactions</p>
                 <p style={{ color:'var(--text-muted)' }}>{accounts.length} accounts</p>
                 <p style={{ color:'var(--text-muted)' }}>{categories.length} categories</p>
+              </div>
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-700">
+                <button onClick={() => { localStorage.removeItem('mcs_onboarding_done'); window.location.href = '/dashboard'; }} className="btn-md btn-secondary w-full justify-start gap-3"><Settings size={16}/>Replay setup guide</button>
+                <p className="form-hint mt-1">Re-open the 3-step getting-started wizard.</p>
               </div>
               <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-sm">
                 <p className="font-medium text-blue-800 dark:text-blue-300 mb-1">Data Safety</p>

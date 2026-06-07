@@ -20,7 +20,7 @@ export function DuplicateWarning({ matches, amount, onDismiss, onConfirm, curren
           <p className="text-sm font-semibold text-amber-800 dark:text-amber-200">Possible duplicate detected</p>
           <p className="text-xs mt-0.5 text-amber-700 dark:text-amber-300">Similar transactions found in the last 3 days:</p>
         </div>
-        <button onClick={onDismiss} className="btn-icon text-amber-400"><X size={14}/></button>
+        <button onClick={onDismiss} aria-label="Dismiss duplicate warning" className="btn-icon text-amber-400"><X size={14}/></button>
       </div>
       <div className="space-y-1">
         {matches.slice(0,3).map(tx => (

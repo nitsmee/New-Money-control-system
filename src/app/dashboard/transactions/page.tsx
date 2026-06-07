@@ -180,6 +180,10 @@ export default function TransactionsPage() {
     if (!form.date || !form.amount || form.amount <= 0) { toast.error('Date and amount are required'); return false; }
     if (cfg.needsFrom && !form.from_account_id) { toast.error(`Please select ${cfg.fromLabel ?? 'From Account'}`); return false; }
     if (cfg.needsTo && !form.to_account_id) { toast.error(`Please select ${cfg.toLabel ?? 'To Account'}`); return false; }
+    // A movement can't have the same source and destination account.
+    if (cfg.needsFrom && cfg.needsTo && form.from_account_id && form.from_account_id === form.to_account_id) {
+      toast.error('From and To accounts must be different'); return false;
+    }
     if (form.type === 'credit_card_payment') {
       const toAcc = accounts.find(a => a.id === form.to_account_id);
       if (!toAcc?.is_credit_card) { toast.error('To Account must be a Credit Card for bill payments'); return false; }
@@ -494,8 +498,8 @@ export default function TransactionsPage() {
                     </td>
                     <td>
                       <div className="flex items-center justify-end gap-1">
-                        <button onClick={() => openEdit(tx)} className="btn-icon text-slate-400 hover:text-blue-600"><Pencil size={14} /></button>
-                        <button onClick={() => handleDelete(tx.id)} disabled={deleting === tx.id} className="btn-icon text-slate-400 hover:text-red-600">
+                        <button onClick={() => openEdit(tx)} aria-label="Edit transaction" className="btn-icon text-slate-400 hover:text-blue-600"><Pencil size={14} /></button>
+                        <button onClick={() => handleDelete(tx.id)} disabled={deleting === tx.id} aria-label="Delete transaction" className="btn-icon text-slate-400 hover:text-red-600">
                           {deleting === tx.id ? <span className="w-3.5 h-3.5 border-2 border-red-300 border-t-red-600 rounded-full animate-spin" /> : <Trash2 size={14} />}
                         </button>
                       </div>
