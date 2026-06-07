@@ -45,8 +45,7 @@ interface MappedRow {
 export function CSVImportModal({ isOpen, onClose, onImported }: Props) {
   const [step, setStep] = useState<Step>('upload');
   const [fileName, setFileName] = useState('');
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [rows, setRows] = useState<any[]>([]);
+  const [rows, setRows] = useState<Record<string, string>[]>([]);
   const [columns, setColumns] = useState<string[]>([]);
   const [colMap, setColMap] = useState<ColumnMap>({ date: '', amount: '', description: '' });
   const [accountId, setAccountId] = useState('');
@@ -65,8 +64,7 @@ export function CSVImportModal({ isOpen, onClose, onImported }: Props) {
       header: true,
       skipEmptyLines: true,
       complete: (result) => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const data = result.data as any[];
+        const data = result.data as Record<string, string>[];
         setRows(data);
         const cols = result.meta.fields ?? [];
         setColumns(cols);
