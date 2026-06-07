@@ -7,13 +7,14 @@ import { useAppStore } from '@/lib/store/appStore';
 import {
   LayoutDashboard, TrendingUp, ArrowLeftRight, Repeat, PieChart, Target,
   BarChart3, Settings, Bell, LogOut, Menu, X, ChevronLeft, Sun, Moon,
-  Monitor, Wallet, FlaskConical, Landmark
+  Monitor, Wallet, Landmark
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { GlobalSearch } from '@/components/GlobalSearch';
 import { SessionWarning } from '@/components/SessionWarning';
 import { OnboardingWizard } from '@/components/OnboardingWizard';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { FinanceBot } from '@/components/FinanceBot';
 
 const NAV = [
   { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, key: 'D' },
@@ -26,7 +27,6 @@ const NAV = [
   { label: 'Goals', href: '/dashboard/goals', icon: Target, key: 'G' },
   { label: 'Reports', href: '/dashboard/reports', icon: BarChart3, key: 'R' },
   { label: 'Alerts', href: '/dashboard/alerts', icon: Bell, key: '' },
-  { label: 'Test Results', href: '/dashboard/test-results', icon: FlaskConical, key: '' },
   { label: 'Settings', href: '/dashboard/settings', icon: Settings, key: ',' },
 ];
 
@@ -251,6 +251,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           })}
         </nav>
       </div>
+      <FinanceBot />
     </div>
   );
 }
