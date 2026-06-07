@@ -916,9 +916,16 @@ function localAnswer(rawQuery: string, data: BotData, me: UserInfo): { reply: Bo
   const qn = normalizeQuery(q);
   const fcBase = (n: number) => formatCurrency(n, data.settings?.currency_symbol ?? '₹');
   const dataReply = (text: string) => ({ reply: { text }, confident: true, kind: 'data' as const });
+  // Soft = a local best-effort answer, but prefer the LLM when one is configured
+  // (used for greetings and vague/loosely-matched money questions).
+  const softReply = (text: string) => ({ reply: { text }, confident: false, kind: 'fallback' as const });
 
   const sec = securityRefusal(q); if (sec) return dataReply(sec);
-  if (/^(hi|hii|hello|hey|yo|help|menu|what can you do|start)\b/.test(q)) return { reply: { text: CAPABILITIES }, confident: true, kind: 'data' };
+  // "help"/"menu"/"what can you do" → show the capabilities list locally.
+  if (/^(help|menu|what can (you|u) do|what do you do)\b/.test(q)) return dataReply(CAPABILITIES);
+  // A greeting / small-talk opener → let the LLM converse (falls back to the
+  // capabilities text when no key is configured).
+  if (/^(hi|hii+|hello+|helo|hey+|yo|sup|namaste|good (morning|afternoon|evening|day)|how('?s| is) it going|how are (you|u)|thanks?|thank you|ok|okay|cool)\b/.test(q)) return softReply(CAPABILITIES);
 
   const id = answerIdentity(q, me); if (id) return dataReply(id);
   const help = answerHelp(q); if (help) return dataReply(help);
@@ -969,13 +976,17 @@ function localAnswer(rawQuery: string, data: BotData, me: UserInfo): { reply: Bo
   // "savings rate") — still a KB concept.
   const kb = findKB(q); if (kb) return { reply: { value: liveValueFor(kb, data) ?? undefined, entry: kb }, confident: true, kind: 'concept' };
 
+  // Loose money-word matches with no explicit date are often vague or contain
+  // typos (e.g. "my ciggrate expense"). Give a local best-effort answer but
+  // prefer the LLM when one is configured (softReply) so it can truly
+  // understand the question. Date-scoped queries above stayed precise/local.
   const dataSignals = intent !== 'unknown' || /\b(transaction|transactions|expense|expenses|income|saving|savings|spent|earned|paid)\b/.test(q);
-  if (dataSignals) return dataReply(answerDataQuery(q, data));
+  if (dataSignals) return softReply(answerDataQuery(q, data));
 
   // Second chance: the normalised phrasing may expose data signals the raw
   // query hid (e.g. "my spendings" → "expense", "earnings" → "income").
   const dataSignalsN = classifyIntent(qn) !== 'unknown' || /\b(transaction|transactions|expense|expenses|income|saving|savings|spent|earned|paid)\b/.test(qn);
-  if (dataSignalsN) return dataReply(answerDataQuery(qn, data));
+  if (dataSignalsN) return softReply(answerDataQuery(qn, data));
 
   // Nothing matched locally → show the helpful capabilities text. kind is
   // 'fallback' so the optional AI (if configured) gets a chance to answer.
