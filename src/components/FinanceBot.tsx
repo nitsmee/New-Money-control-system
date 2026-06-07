@@ -1,9 +1,21 @@
 'use client';
-import { useState, useRef, useEffect } from 'react';
-import { Bot, X, Send } from 'lucide-react';
+import { useState, useRef, useEffect, useMemo } from 'react';
+import { Bot, X, Send, Sparkles } from 'lucide-react';
+import {
+  format, startOfMonth, endOfMonth, startOfWeek, endOfWeek,
+  subDays, subMonths, subWeeks, subYears, startOfYear, endOfYear,
+  getDay, startOfDay,
+} from 'date-fns';
+import { useAppStore } from '@/lib/store/appStore';
+import {
+  calculateAccountBalances, calculateDashboardKPIs, formatCurrency,
+} from '@/lib/utils/calculations';
+import type {
+  Account, Transaction, Income, Category, UserSettings, DashboardKPIs, DateFilter,
+} from '@/types';
 
 // ============================================================
-// KNOWLEDGE BASE
+// CONCEPTUAL KNOWLEDGE BASE (the "how is this calculated" answers)
 // ============================================================
 
 interface KBEntry {
@@ -16,321 +28,613 @@ interface KBEntry {
 
 const KNOWLEDGE_BASE: KBEntry[] = [
   {
-    keywords: ['safe to spend', 'safe_to_spend', 'how much can i spend', 'how much can i use', 'spend safely'],
+    keywords: ['safe to spend', 'safe_to_spend', 'how much can i spend', 'spend safely'],
     title: 'Safe to Spend',
     formula: 'Spendable Balance − Bank-paid Upcoming Bills − Total CC Outstanding − Safe Spend Buffer',
     explanation:
-      'Safe to Spend is the most conservative estimate of freely-available cash. It starts with your Spendable Balance (cash accounts), then deducts: upcoming fixed bills that will be paid from your bank (not your credit card), the full outstanding balance on all credit cards, and your configured safety buffer. The result can be negative — that just means your current cash is already spoken for.',
-    example:
-      'Spendable ₹80,000 − Upcoming bank bills ₹12,000 − CC outstanding ₹8,000 − Buffer ₹5,000 = Safe to Spend ₹55,000',
+      'The most conservative estimate of freely-available cash. Starts with your cash accounts, then deducts upcoming bank-paid bills, all credit card outstanding, and your safety buffer. Can be negative — meaning your cash is already spoken for.',
+    example: 'Spendable ₹80,000 − Upcoming ₹12,000 − CC ₹8,000 − Buffer ₹5,000 = ₹55,000',
   },
   {
-    keywords: ['savings rate', 'savings_rate', 'how much am i saving', 'saving percent', 'saving rate'],
+    keywords: ['savings rate', 'savings_rate', 'saving percent', 'saving rate'],
     title: 'Savings Rate',
     formula: 'min(100, (Total Savings ÷ True Income) × 100)',
     explanation:
-      'Savings Rate shows what percentage of your "true" income you actually set aside this month. True Income is used as the denominator (not total income) so gifts, reimbursements, and family contributions don\'t inflate it. The rate is capped at 100% to handle edge cases.',
-    example:
-      'Moved to savings ₹20,000, True Income ₹100,000 → (20,000 ÷ 100,000) × 100 = 20% savings rate',
+      'What percentage of your true income you set aside this month. Uses True Income (not total) so gifts and reimbursements don\'t inflate it.',
+    example: 'Saved ₹20,000, True Income ₹100,000 → 20%',
   },
   {
-    keywords: ['true income', 'true_income', 'what is true income', 'real income', 'include_in_true_income'],
+    keywords: ['true income', 'true_income', 'real income'],
     title: 'True Income',
-    formula: 'Sum of Income entries where include_in_true_income = true',
+    formula: 'Sum of income where "Include in True Income" is on',
     explanation:
-      'True Income counts only the money you genuinely earned — salary, freelance payments, business income, and so on. It deliberately excludes one-off family contributions, reimbursements, and gifts, because those inflate your apparent income and make your savings rate look artificially good. Each income entry has an "Include in True Income" toggle you control.',
-    example:
-      'Salary ₹90,000 (included) + Freelance ₹10,000 (included) + Reimbursement ₹3,000 (excluded) = True Income ₹100,000',
+      'Only money you genuinely earned — salary, freelance, business. Excludes one-off family money, reimbursements, and gifts, which would otherwise inflate your savings rate.',
+    example: 'Salary ₹90,000 + Freelance ₹10,000 (reimbursement ₹3,000 excluded) = ₹100,000',
   },
   {
-    keywords: ['net cashflow', 'net_cashflow', 'cashflow', 'cash flow', 'what is left'],
+    keywords: ['net cashflow', 'net_cashflow', 'cashflow', 'cash flow'],
     title: 'Net Cashflow',
     formula: 'Total Income − Total Expenses − Total Savings',
     explanation:
-      'Net Cashflow is what remains after you account for all spending and money moved to savings this month. A positive number means you have unallocated money left. A negative number means you spent or saved more than you earned — typically covered by drawing down a cash account balance.',
-    example:
-      'Income ₹100,000 − Expenses ₹60,000 − Savings ₹20,000 = Net Cashflow ₹20,000',
+      'What remains after all spending and money moved to savings this month. Positive = money left over; negative = you drew down a balance.',
+    example: 'Income ₹100,000 − Expenses ₹60,000 − Savings ₹20,000 = ₹20,000',
   },
   {
-    keywords: ['budget allowed till date', 'budget status', 'allowed till date', 'daily budget', 'budget_allowed_till_date', 'allowed today'],
+    keywords: ['budget status', 'allowed till date', 'daily budget', 'allowed today'],
     title: 'Budget: Allowed Till Date',
     formula: 'Posted Fixed Bills + (Discretionary Daily Rate × Days Elapsed)',
     explanation:
-      'The budget bar compares what you have actually spent against what you were "allowed" to spend up to today. Fixed bills (like rent or SIPs) are treated as lump sums on their due date, not spread across the month. Only the discretionary portion of your budget is paced day-by-day. If your actual spend exceeds "allowed till date", the bar turns red.',
-    example:
-      'Budget ₹30,000, Fixed bills ₹10,000, Discretionary ₹20,000 over 30 days = ₹667/day. On day 15: Allowed = ₹10,000 + ₹10,000 = ₹20,000',
+      'Compares actual spend vs what you were allowed up to today. Fixed bills count as lump sums on their due date; only the discretionary part is paced daily. Bar turns red if actual exceeds allowed.',
+    example: 'Budget ₹30,000, fixed ₹10,000 → ₹667/day discretionary. Day 15: allowed ₹20,000',
   },
   {
-    keywords: ['projected month end', 'projected_month_end', 'projected', 'forecast', 'projection', 'end of month'],
+    keywords: ['projected', 'forecast', 'projection', 'end of month'],
     title: 'Projected Month-End',
     formula: 'Posted Fixed Bills + (Discretionary Daily Rate × Days in Month)',
     explanation:
-      'The projected month-end figure extrapolates your current discretionary spending pace across the rest of the month and adds the full fixed bill total. It answers: "If I keep spending at this rate, what will my total be by the 31st?" This helps you see budget overruns before they happen.',
-    example:
-      'Fixed bills ₹10,000, spent ₹5,000 discretionary in 10 days (₹500/day) × 30 days = ₹15,000 → Projected ₹25,000',
+      'Extrapolates your discretionary pace across the full month and adds fixed bills. Answers "if I keep spending like this, where will I land?"',
+    example: 'Fixed ₹10,000 + ₹500/day × 30 = ₹25,000',
   },
   {
-    keywords: ['account balance', 'balance', 'how is balance calculated', 'account_balance', 'how balance works'],
+    keywords: ['how is balance calculated', 'how balance works', 'balance calculation'],
     title: 'Account Balance',
     explanation:
-      'Each account\'s balance is calculated by replaying every transaction from the beginning. Income credits an account. Expenses debit it. The sign convention is: positive balance = money you have. For credit cards, the balance is flipped — positive outstanding means you OWE that amount.',
-    example:
-      'Account starts at ₹0. Income ₹100,000 → ₹100,000. Expense ₹20,000 → ₹80,000. Transfer out ₹10,000 → ₹70,000. Final balance: ₹70,000',
+      'Every account replays all transactions: income credits, expenses debit. Positive = money you have. For credit cards the sign flips — positive outstanding means you OWE.',
+    example: '₹0 + income ₹100,000 − expense ₹20,000 − transfer ₹10,000 = ₹70,000',
   },
   {
-    keywords: ['cc outstanding', 'credit card', 'outstanding', 'cc_outstanding', 'credit card balance', 'card debt'],
+    keywords: ['credit card outstanding', 'how is cc', 'card debt calculation'],
     title: 'Credit Card Outstanding',
-    formula: 'Initial Outstanding + CC Purchases − CC Bill Payments − Transfers to Card',
+    formula: 'Initial + CC Purchases − Bill Payments − Transfers to Card',
     explanation:
-      'The CC outstanding tracks how much you currently owe on each card. Every purchase on the card increases the outstanding. Every time you pay the card bill, or transfer money to the card, the outstanding decreases. The dashboard always shows the live outstanding — it is not just this month\'s spending.',
-    example:
-      'Opening balance ₹5,000 + Purchases ₹8,000 − Bill payment ₹10,000 = Outstanding ₹3,000',
+      'How much you owe on each card right now. Purchases increase it; bill payments and transfers to the card decrease it. Always the live total, not just this month.',
+    example: 'Opening ₹5,000 + ₹8,000 − ₹10,000 = ₹3,000',
   },
   {
-    keywords: ['goal progress', 'goal', 'can i buy', 'progress percent', 'goal_progress', 'goals', 'how close am i'],
+    keywords: ['goal progress', 'can i buy', 'progress percent', 'how close am i'],
     title: 'Goal Progress',
     formula: 'min(100, (Available Savings ÷ Expected Cost) × 100)',
     explanation:
-      'Goal progress tells you what percentage of a goal\'s target price you have already saved. Goals draw from a shared savings pool in priority order. If a goal has an "Amount Allocated" set, that fixed amount is used instead of the shared pool. Once the percentage hits 100%, the goal is ready to purchase.',
-    example:
-      'Goal cost ₹50,000, Available savings ₹30,000 → (30,000 ÷ 50,000) × 100 = 60% progress',
+      'How much of a goal you\'ve saved. Goals draw from a shared savings pool in priority order; an "Amount Allocated" overrides the pool. 100% = ready to buy.',
+    example: 'Cost ₹50,000, available ₹30,000 → 60%',
   },
   {
-    keywords: ['month over month', 'mom delta', 'vs last month', 'delta', 'arrow', 'mom_delta', 'compared to last month', 'change'],
+    keywords: ['month over month', 'mom delta', 'vs last month', 'the arrow', 'what does the arrow'],
     title: 'Month-over-Month Delta',
     formula: 'Current Month Value − Previous Month Value',
     explanation:
-      'The small arrows (▲ / ▼) on KPI cards show how this month compares to the same metric last month. A green upward arrow on Income means you earned more. A green downward arrow on Expenses means you spent less (an improvement). A red arrow means the opposite. The delta figure shows the exact rupee change.',
-    example:
-      'Last month income ₹90,000, this month ₹1,00,000 → ▲ ₹10,000 (green, improvement). Last month expenses ₹60,000, this month ₹65,000 → ▲ ₹5,000 (red, worse)',
+      'The ▲/▼ arrows on KPI cards compare this month to last. Green = improvement (more income / less expense), red = worse. The figure is the exact rupee change.',
+    example: 'Income ₹90,000 → ₹100,000 = ▲ ₹10,000 (green)',
   },
   {
-    keywords: ['spendable balance', 'spendable', 'cash accounts', 'spendable_balance', 'how much cash', 'available cash'],
+    keywords: ['spendable', 'cash accounts', 'available cash'],
     title: 'Spendable Balance',
-    formula: 'Sum of balances of all active cash-type accounts with "Show on Dashboard" enabled',
+    formula: 'Sum of active cash-type accounts shown on dashboard',
     explanation:
-      'Spendable Balance is the total across all your current/checking/bank accounts that are marked as cash-type. It excludes savings accounts, investment accounts, family/shared accounts, and credit cards. This is your day-to-day spending pool before any deductions.',
-    example:
-      'HDFC Savings (cash role) ₹50,000 + ICICI Checking ₹30,000 = Spendable Balance ₹80,000',
+      'Your day-to-day pool: current/checking/bank accounts marked cash-type. Excludes savings, investments, family/shared accounts, and credit cards.',
+    example: 'HDFC ₹50,000 + ICICI ₹30,000 = ₹80,000',
   },
   {
-    keywords: ['upcoming fixed', 'upcoming bills', 'upcoming_fixed', 'upcoming expenses', 'bills due', 'due this month'],
+    keywords: ['upcoming fixed', 'upcoming bills', 'bills due', 'due this month'],
     title: 'Upcoming Fixed Expenses',
     explanation:
-      'Upcoming Fixed shows recurring bills that are due this month but haven\'t been posted yet as transactions. It excludes: bills that have already been auto-posted this month, bills whose date hasn\'t started yet (start_date in the future), and bills that have expired (end_date passed). This is the amount you still need to set aside.',
-    example:
-      'Rent ₹15,000 (not yet posted) + Electricity ₹2,000 (not yet posted) = Upcoming Fixed ₹17,000',
+      'Recurring bills due this month not yet posted. Excludes already-posted, not-yet-started, and expired ones. This is what you still need to set aside.',
+    example: 'Rent ₹15,000 + Electricity ₹2,000 = ₹17,000',
   },
   {
-    keywords: ['bank balance', 'total bank balance', 'bank_balance', 'total liquid'],
-    title: 'Total Bank Balance',
-    formula: 'Spendable Balance + Savings Balance',
-    explanation:
-      'Total Bank Balance is the sum of all your liquid personal money — cash accounts plus savings accounts. It does NOT include investment accounts (SIPs, mutual funds), family/shared accounts, or credit card outstanding. This is your net personal liquid wealth.',
-    example:
-      'Spendable ₹80,000 + Savings ₹1,20,000 = Total Bank Balance ₹2,00,000',
-  },
-  {
-    keywords: ['salary bar', 'salary usage', 'salary_bar', 'salary limit', 'income bar', 'used salary'],
-    title: 'Salary Usage Bar',
-    formula: 'Total Expenses ÷ Total Income × 100',
-    explanation:
-      'The salary bar at the top of the dashboard shows what percentage of this month\'s income has been spent. If the bar is blue, you\'re within budget. If it turns red, you\'ve spent more than your total income this month. The bar only appears if you have salary income recorded for the current month.',
-    example:
-      'Salary ₹1,00,000, Spent ₹65,000 → 65% bar (blue). If spent ₹1,10,000 → 110% bar (red, over budget)',
-  },
-  {
-    keywords: ['payday sweep', 'sweep', 'auto sweep', 'payday_sweep', 'leftover', 'sweep to savings'],
+    keywords: ['payday sweep', 'auto sweep', 'leftover', 'sweep to savings'],
     title: 'Payday Sweep',
     explanation:
-      'When your salary lands, the app checks if there is leftover money in your salary account from the previous month. That leftover is offered to move to savings automatically (if sweep is enabled in Settings). This prevents old salary money from inflating your "Safe to Spend" — you start each month fresh on the new salary only.',
-    example:
-      'Previous month leftover in salary account: ₹12,000 → auto-moved to Savings on payday. New month starts with just the new salary.',
+      'When salary lands, leftover from the previous month in your salary account is offered to move to savings (if enabled). Keeps old money from inflating Safe to Spend.',
+    example: 'Leftover ₹12,000 → auto-moved to Savings on payday',
   },
   {
-    keywords: ['auto process', 'auto post', 'automatic', 'fixed_expense_auto', 'recurring auto', 'auto-process'],
-    title: 'Auto-Processing Fixed Expenses',
+    keywords: ['auto process', 'auto post', 'automatic', 'auto-process'],
+    title: 'Auto-Processing',
     explanation:
-      'Each time you open the dashboard, the app automatically creates real transactions for any fixed expenses that are due and haven\'t been posted yet this month. This keeps your balances and budget tracking accurate without manual entry. The process is idempotent — it will never create a duplicate if the same bill was already posted. A toast notification appears if any entries were auto-posted.',
-    example:
-      'SIP of ₹5,000 due on the 5th → if it\'s the 6th and no transaction exists, app auto-creates it. Next time you open the dashboard, it finds it already posted and skips it.',
+      'On dashboard load, due fixed expenses and recurring income that haven\'t been posted yet are auto-created as real entries. Idempotent — never duplicates.',
+    example: 'SIP ₹5,000 due on 5th → auto-created if missing, skipped if already there',
   },
   {
-    keywords: ['recurring income', 'recurring_income', 'auto income', 'income template'],
-    title: 'Recurring Income',
-    explanation:
-      'Recurring Income templates work exactly like fixed expenses but for income. You set up a template with an amount, source, and due day. Each time the dashboard loads, any due recurring income entries that haven\'t been created yet are auto-processed. This is useful for consistent monthly income like rent received, stipends, or side income.',
-    example:
-      'Rent received template: ₹10,000 on the 1st of each month → automatically creates an income entry on the 1st if not already present.',
-  },
-  {
-    keywords: ['family expense', 'family_expense', 'personal expense', 'shared expense', 'joint expense'],
+    keywords: ['family expense', 'personal expense', 'shared expense'],
     title: 'Family vs Personal Expense',
     explanation:
-      'Every expense is classified as either "family" or "personal" based on which account it was paid from. If the source account has a type of family/shared/joint, it\'s counted as a family expense. All other expenses are personal. This lets you see how much of your spending is household/shared versus your own individual spending.',
-    example:
-      'Grocery paid from Joint Account (family type) → Family Expense. Dinner paid from HDFC Savings (cash type) → Personal Expense.',
+      'Each expense is family or personal based on the source account. Paid from a family/shared/joint account = family; everything else = personal.',
+    example: 'Grocery from Joint Account = Family; Dinner from HDFC = Personal',
   },
   {
-    keywords: ['investment', 'investments', 'net worth', 'investment_accounts', 'sip', 'mutual fund'],
-    title: 'Investment Accounts & Net Worth',
+    keywords: ['investment', 'net worth', 'sip', 'mutual fund'],
+    title: 'Investments & Net Worth',
+    formula: 'Net Worth = Cash + Savings + Investments − CC Outstanding',
     explanation:
-      'Investment accounts (SIPs, mutual funds, stocks, demat accounts) are excluded from both Spendable Balance and Savings Balance. They are only counted in the Net Worth figure shown below the KPI cards. Net Worth = Cash + Savings + Investments − CC Outstanding. This keeps your day-to-day spending figures clean and unaffected by long-term holdings.',
-    example:
-      'Cash ₹80,000 + Savings ₹1,20,000 + Investments ₹3,00,000 − CC ₹8,000 = Net Worth ₹4,92,000. Spendable is still just ₹80,000.',
-  },
-  {
-    keywords: ['budget recovery', 'recovery', 'recovery per day', 'budget_recovery', 'overspent recovery', 'catch up'],
-    title: 'Budget Recovery Per Day',
-    formula: 'Overspent Amount ÷ Days Remaining in Month',
-    explanation:
-      'When you\'ve spent more than the "allowed till date" in a budget category, the app calculates how much you need to cut back each day for the rest of the month to get back on track. This is shown on the budget page. If there are no remaining days, it shows infinity (you\'ve already exceeded the month).',
-    example:
-      'Overspent by ₹3,000 with 10 days remaining → Recovery per day = ₹300. Spend ₹300 less than your normal daily rate to recover by month-end.',
+      'Investment accounts are excluded from Spendable and Savings — they only count toward Net Worth. Keeps daily spending figures clean.',
+    example: 'Cash ₹80k + Savings ₹120k + Invest ₹300k − CC ₹8k = ₹492k net worth',
   },
 ];
 
-const FALLBACK: KBEntry = {
-  keywords: [],
-  title: 'I can help with...',
-  explanation:
-    'I can explain: Safe to Spend, Savings Rate, True Income, Net Cashflow, Budget status, Goal progress, Account balances, Credit card outstanding, Month-over-month deltas, Upcoming fixed expenses, Payday sweep, and more. Just ask me anything about a number you see in the app!',
-};
+const FALLBACK_TEXT =
+  "I can answer two kinds of questions:\n\n📊 **About your data** — try:\n• \"How many transactions last Sunday?\"\n• \"How much did I spend this month?\"\n• \"Summary of last week\"\n• \"Biggest expense in June\"\n• \"Balance of all accounts\"\n• \"How much on Food this month?\"\n\n💡 **About calculations** — try:\n• \"What's my safe to spend?\"\n• \"Savings rate?\"\n• \"How is balance calculated?\"";
 
 const QUICK_CHIPS = [
-  'Safe to spend?',
-  'Savings rate?',
-  'Budget status?',
-  'Net cashflow?',
-  'True income?',
+  'Summary of this month',
+  'How much did I spend this month?',
+  'Biggest expense this month',
+  "What's my safe to spend?",
+  'Balance of all accounts',
 ];
 
 // ============================================================
-// KEYWORD MATCHING
+// LIGHTWEIGHT ENTRY SHAPE shared by Transaction + Income
 // ============================================================
 
-function findAnswer(query: string): KBEntry {
-  const q = query.toLowerCase();
-  for (const entry of KNOWLEDGE_BASE) {
-    if (entry.keywords.some(kw => q.includes(kw))) {
-      return entry;
-    }
+interface Entry {
+  amount: number;
+  date: string;
+  description?: string | null;
+  category?: string | null;
+  source?: string | null;
+  type?: string;
+}
+
+const sum = (items: Entry[]) => items.reduce((s, x) => s + (x.amount || 0), 0);
+const descOf = (e: Entry) => e.description || e.category || e.source || '';
+const eq = (a: string | null | undefined, b: string) => (a || '').toLowerCase() === b.toLowerCase();
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// ============================================================
+// DATE RANGE PARSER — the heart of the data engine
+// ============================================================
+
+interface DateRange { start: string; end: string; label: string; }
+
+const WEEKDAYS: Record<string, number> = {
+  sunday: 0, sun: 0, monday: 1, mon: 1, tuesday: 2, tue: 2, tues: 2,
+  wednesday: 3, wed: 3, thursday: 4, thu: 4, thurs: 4,
+  friday: 5, fri: 5, saturday: 6, sat: 6,
+};
+
+const MONTHS: Record<string, number> = {
+  january: 0, jan: 0, february: 1, feb: 1, march: 2, mar: 2, april: 3, apr: 3,
+  may: 4, june: 5, jun: 5, july: 6, jul: 6, august: 7, aug: 7,
+  september: 8, sep: 8, sept: 8, october: 9, oct: 9,
+  november: 10, nov: 10, december: 11, dec: 11,
+};
+
+const fmt = (d: Date) => format(d, 'yyyy-MM-dd');
+
+function parseDateRange(q: string, today = new Date()): DateRange | null {
+  const t = startOfDay(today);
+
+  if (/\btoday\b/.test(q)) return { start: fmt(t), end: fmt(t), label: 'today' };
+  if (/\byesterday\b/.test(q)) { const d = subDays(t, 1); return { start: fmt(d), end: fmt(d), label: 'yesterday' }; }
+
+  const nDays = q.match(/\b(?:last|past|previous)\s+(\d+)\s+days?\b/);
+  if (nDays) { const n = +nDays[1]; return { start: fmt(subDays(t, n - 1)), end: fmt(t), label: `last ${n} days` }; }
+
+  if (/\blast weekend\b/.test(q)) {
+    const dow = getDay(t);
+    const lastSun = subDays(t, dow === 0 ? 7 : dow);
+    const lastSat = subDays(lastSun, 1);
+    return { start: fmt(lastSat), end: fmt(lastSun), label: 'last weekend' };
   }
-  return FALLBACK;
+
+  // "last/this/previous <weekday>"
+  const wd = q.match(/\b(last|this|previous|past)\s+(sunday|sun|monday|mon|tuesday|tue|tues|wednesday|wed|thursday|thu|thurs|friday|fri|saturday|sat)\b/);
+  if (wd) {
+    const target = WEEKDAYS[wd[2]];
+    const dow = getDay(t);
+    let diff = dow - target;
+    if (diff <= 0) diff += 7; // most recent past occurrence (never today)
+    const d = subDays(t, diff);
+    return { start: fmt(d), end: fmt(d), label: `${wd[1]} ${cap(wd[2])}` };
+  }
+
+  // bare weekday: "on sunday" / "sunday"
+  const bareWd = q.match(/\b(?:on\s+)?(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/);
+  if (bareWd) {
+    const target = WEEKDAYS[bareWd[1]];
+    const dow = getDay(t);
+    let diff = dow - target;
+    if (diff < 0) diff += 7; // diff 0 = today is that day → use today
+    const d = subDays(t, diff);
+    return { start: fmt(d), end: fmt(d), label: cap(bareWd[1]) + (diff === 0 ? ' (today)' : '') };
+  }
+
+  if (/\bthis week\b/.test(q)) {
+    return { start: fmt(startOfWeek(t, { weekStartsOn: 1 })), end: fmt(endOfWeek(t, { weekStartsOn: 1 })), label: 'this week' };
+  }
+  if (/\b(last|previous|past) week\b/.test(q)) {
+    const w = subWeeks(t, 1);
+    return { start: fmt(startOfWeek(w, { weekStartsOn: 1 })), end: fmt(endOfWeek(w, { weekStartsOn: 1 })), label: 'last week' };
+  }
+
+  if (/\bthis month\b/.test(q)) return { start: fmt(startOfMonth(t)), end: fmt(endOfMonth(t)), label: 'this month' };
+  if (/\b(last|previous|past) month\b/.test(q)) { const d = subMonths(t, 1); return { start: fmt(startOfMonth(d)), end: fmt(endOfMonth(d)), label: 'last month' }; }
+
+  if (/\bthis year\b/.test(q)) return { start: fmt(startOfYear(t)), end: fmt(endOfYear(t)), label: 'this year' };
+  if (/\b(last|previous|past) year\b/.test(q)) { const d = subYears(t, 1); return { start: fmt(startOfYear(d)), end: fmt(endOfYear(d)), label: 'last year' }; }
+
+  // named month, optional year
+  const mon = q.match(/\b(january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sept|sep|october|oct|november|nov|december|dec)\b\.?\s*(\d{4})?/);
+  if (mon) {
+    const mIdx = MONTHS[mon[1]];
+    const yr = mon[2] ? +mon[2] : (mIdx > t.getMonth() ? t.getFullYear() - 1 : t.getFullYear());
+    const s = new Date(yr, mIdx, 1);
+    return { start: fmt(s), end: fmt(endOfMonth(s)), label: format(s, 'MMMM yyyy') };
+  }
+
+  const yrOnly = q.match(/\b(20\d{2})\b/);
+  if (yrOnly) { const yr = +yrOnly[1]; return { start: `${yr}-01-01`, end: `${yr}-12-31`, label: String(yr) }; }
+
+  return null;
+}
+
+const daysInRange = (r: DateRange) =>
+  Math.round((new Date(r.end).getTime() - new Date(r.start).getTime()) / 86400000) + 1;
+
+// ============================================================
+// INTENT + ENTITY CLASSIFICATION
+// ============================================================
+
+type Intent = 'count' | 'sum' | 'summary' | 'list' | 'top' | 'average' | 'balance' | 'unknown';
+type EntityType = 'expense' | 'income' | 'saving' | 'transfer' | 'cc_payment' | 'transaction';
+
+function classifyIntent(q: string): Intent {
+  if (/\b(summary|summari[sz]e|overview|recap|breakdown|how did i do|what happened)\b/.test(q)) return 'summary';
+  if (/\b(how many|number of|count of|count)\b/.test(q)) return 'count';
+  if (/\b(biggest|largest|highest|top|most expensive|maximum|smallest|lowest|max)\b/.test(q)) return 'top';
+  if (/\b(average|avg|mean|per day|typical)\b/.test(q)) return 'average';
+  if (/\b(balance|how much.*(do i have|in my|left in)|what.*balance|money in)\b/.test(q)) return 'balance';
+  if (/\b(list|show me|show all|which|what.*(transactions|expenses|did i (spend|buy)))\b/.test(q)) return 'list';
+  if (/\b(how much|total|sum|spent|spend|spending|earned|saved|did i pay)\b/.test(q)) return 'sum';
+  return 'unknown';
+}
+
+function classifyEntity(q: string): EntityType {
+  if (/\b(cc payment|card payment|credit card payment|bill payment|paid the card)\b/.test(q)) return 'cc_payment';
+  if (/\b(income|earned|earning|got paid|received|salary credited)\b/.test(q)) return 'income';
+  if (/\bsavings?\b|\bsaved\b/.test(q)) return 'saving';
+  if (/\b(transfer|transferred|moved money)\b/.test(q)) return 'transfer';
+  if (/\b(expense|expenses|spent|spend|spending|bought|purchase|paid for|cost)\b/.test(q)) return 'expense';
+  return 'transaction';
+}
+
+function pickEntity(entity: EntityType, tx: Transaction[], inc: Income[]): { items: Entry[]; noun: string } {
+  switch (entity) {
+    case 'expense': return { items: tx.filter(t => t.type === 'expense') as unknown as Entry[], noun: 'expense' };
+    case 'saving': return { items: tx.filter(t => t.type === 'saving') as unknown as Entry[], noun: 'saving' };
+    case 'transfer': return { items: tx.filter(t => t.type === 'transfer') as unknown as Entry[], noun: 'transfer' };
+    case 'cc_payment': return { items: tx.filter(t => t.type === 'credit_card_payment') as unknown as Entry[], noun: 'card payment' };
+    case 'income': return { items: inc as unknown as Entry[], noun: 'income entry' };
+    default: return { items: tx as unknown as Entry[], noun: 'transaction' };
+  }
 }
 
 // ============================================================
-// MESSAGE TYPES
+// FILTER MATCHERS (category / account)
 // ============================================================
 
-interface Message {
-  role: 'user' | 'bot';
-  text: string;
-  entry?: KBEntry;
+function matchCategory(q: string, categories: Category[]): string | null {
+  const names = categories.map(c => c.name).filter(Boolean).sort((a, b) => b.length - a.length);
+  for (const n of names) {
+    if (new RegExp(`\\b${escapeRegex(n.toLowerCase())}\\b`).test(q)) return n;
+  }
+  return null;
+}
+
+function matchAccount(q: string, accounts: Account[]): Account | null {
+  for (const a of accounts) {
+    if (new RegExp(`\\b${escapeRegex(a.name.toLowerCase())}\\b`).test(q)) return a;
+  }
+  const STOP = ['the', 'and', 'account', 'bank', 'card', 'credit', 'savings', 'saving', 'cash'];
+  for (const a of accounts) {
+    const words = a.name.toLowerCase().split(/\s+/).filter(w => w.length > 2 && !STOP.includes(w));
+    if (words.some(w => new RegExp(`\\b${escapeRegex(w)}\\b`).test(q))) return a;
+  }
+  return null;
+}
+
+function topCategory(expenses: Entry[]): { category: string; amount: number } | null {
+  const map = new Map<string, number>();
+  expenses.forEach(t => {
+    const c = t.category || 'Uncategorised';
+    map.set(c, (map.get(c) || 0) + t.amount);
+  });
+  let best: string | null = null, max = 0;
+  map.forEach((v, k) => { if (v > max) { max = v; best = k; } });
+  return best ? { category: best, amount: max } : null;
 }
 
 // ============================================================
-// BOT RESPONSE BUBBLE
+// DATA QUERY EXECUTOR
 // ============================================================
 
-function BotBubble({ entry }: { entry: KBEntry }) {
+interface BotData {
+  transactions: Transaction[];
+  income: Income[];
+  accounts: Account[];
+  categories: Category[];
+  settings: UserSettings | null;
+  kpis: DashboardKPIs | null;
+}
+
+function answerBalance(q: string, data: BotData, fc: (n: number) => string): string {
+  const balances = calculateAccountBalances(data.accounts, data.income, data.transactions);
+  const acct = matchAccount(q, data.accounts);
+  if (acct) {
+    const b = balances.find(x => x.account.id === acct.id);
+    if (!b) return `I couldn't find that account.`;
+    if (b.is_credit_card) return `💳 ${acct.name} outstanding: ${fc(b.outstanding ?? 0)} (amount you owe).`;
+    return `💰 ${acct.name} balance: ${fc(b.balance)}.`;
+  }
+  const active = balances.filter(b => b.account.is_active);
+  if (active.length === 0) return 'No active accounts found yet.';
+  const lines = active.map(b =>
+    b.is_credit_card ? `• ${b.account.name}: ${fc(b.outstanding ?? 0)} owed` : `• ${b.account.name}: ${fc(b.balance)}`
+  );
+  const liquid = active.filter(b => !b.is_credit_card).reduce((s, b) => s + b.balance, 0);
+  const owed = active.filter(b => b.is_credit_card).reduce((s, b) => s + (b.outstanding ?? 0), 0);
+  return `💰 Account balances:\n${lines.join('\n')}\n\nTotal cash/savings: ${fc(liquid)}${owed > 0 ? `\nTotal owed on cards: ${fc(owed)}` : ''}`;
+}
+
+function buildSummary(tx: Transaction[], inc: Income[], range: DateRange, fc: (n: number) => string, scopeSuffix: string): string {
+  const expenses = tx.filter(t => t.type === 'expense') as unknown as Entry[];
+  const savings = tx.filter(t => t.type === 'saving') as unknown as Entry[];
+  const ccPays = tx.filter(t => t.type === 'credit_card_payment') as unknown as Entry[];
+  const transfers = tx.filter(t => t.type === 'transfer') as unknown as Entry[];
+  const incomeE = inc as unknown as Entry[];
+
+  const scope = `${range.label}${scopeSuffix}`;
+  if (tx.length === 0 && inc.length === 0) return `Nothing recorded ${scope}. 🎉`;
+
+  const lines: string[] = [`📊 Summary — ${scope}`, ''];
+  lines.push(`• ${tx.length} transaction${tx.length === 1 ? '' : 's'}${inc.length ? `, ${inc.length} income entr${inc.length === 1 ? 'y' : 'ies'}` : ''}`);
+  if (inc.length) lines.push(`• 💵 Income: ${fc(sum(incomeE))}`);
+  lines.push(`• 💸 Spent: ${fc(sum(expenses))} (${expenses.length} expense${expenses.length === 1 ? '' : 's'})`);
+  if (savings.length) lines.push(`• 🏦 Saved: ${fc(sum(savings))} (${savings.length})`);
+  if (ccPays.length) lines.push(`• 💳 Card payments: ${fc(sum(ccPays))} (${ccPays.length})`);
+  if (transfers.length) lines.push(`• 🔄 Transfers: ${fc(sum(transfers))} (${transfers.length})`);
+  const tc = topCategory(expenses);
+  if (tc) lines.push(`• 🏷️ Top category: ${tc.category} (${fc(tc.amount)})`);
+  if (expenses.length) {
+    const big = expenses.reduce((a, b) => (b.amount > a.amount ? b : a));
+    lines.push(`• 🔝 Biggest: ${descOf(big) || 'expense'} ${fc(big.amount)}`);
+  }
+  return lines.join('\n');
+}
+
+function answerDataQuery(q: string, data: BotData): string {
+  const sym = data.settings?.currency_symbol ?? '₹';
+  const fc = (n: number) => formatCurrency(n, sym);
+  const intent = classifyIntent(q);
+  const entity = classifyEntity(q);
+
+  if (intent === 'balance') return answerBalance(q, data, fc);
+
+  let range = parseDateRange(q);
+  const defaulted = !range;
+  if (!range) {
+    const now = new Date();
+    range = { start: fmt(startOfMonth(now)), end: fmt(endOfMonth(now)), label: 'this month' };
+  }
+
+  const cat = matchCategory(q, data.categories);
+  const acct = matchAccount(q, data.accounts);
+
+  let tx = data.transactions.filter(t => t.date >= range!.start && t.date <= range!.end);
+  let inc = data.income.filter(i => i.date >= range!.start && i.date <= range!.end);
+  if (cat) { tx = tx.filter(t => eq(t.category, cat)); inc = inc.filter(i => eq(i.category, cat)); }
+  if (acct) {
+    tx = tx.filter(t => t.from_account_id === acct.id || t.to_account_id === acct.id);
+    inc = inc.filter(i => i.to_account_id === acct.id);
+  }
+
+  const scopeSuffix = `${cat ? ` · ${cat}` : ''}${acct ? ` · ${acct.name}` : ''}`;
+  const scope = `${range.label}${scopeSuffix}`;
+  const hint = defaulted ? '\n\n(Defaulted to this month — add a date like "last week" to change it.)' : '';
+
+  if (intent === 'summary') return buildSummary(tx, inc, range, fc, scopeSuffix) + hint;
+
+  const { items, noun } = pickEntity(entity, tx, inc);
+
+  if (intent === 'count') {
+    if (!items.length) return `No ${noun}s found ${scope}.${hint}`;
+    return `🧾 ${items.length} ${noun}${items.length === 1 ? '' : 's'} ${scope}. Total: ${fc(sum(items))}.${hint}`;
+  }
+
+  if (intent === 'top') {
+    if (!items.length) return `No ${noun}s found ${scope}.${hint}`;
+    const max = items.reduce((a, b) => (b.amount > a.amount ? b : a));
+    return `🔝 Biggest ${noun} ${scope}: ${fc(max.amount)}${descOf(max) ? ` — ${descOf(max)}` : ''} (${max.date}).${hint}`;
+  }
+
+  if (intent === 'average') {
+    if (!items.length) return `No ${noun}s found ${scope}.${hint}`;
+    const d = daysInRange(range);
+    return `📊 ${cap(noun)}s ${scope}: ${fc(sum(items) / items.length)} avg each, ${fc(sum(items) / d)}/day (${items.length} over ${d} day${d === 1 ? '' : 's'}).${hint}`;
+  }
+
+  if (intent === 'list') {
+    if (!items.length) return `No ${noun}s found ${scope}.${hint}`;
+    const sorted = [...items].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 8);
+    const rows = sorted.map(t => `• ${t.date} · ${descOf(t) || noun} · ${fc(t.amount)}`);
+    const more = items.length > 8 ? `\n…and ${items.length - 8} more` : '';
+    return `🧾 ${items.length} ${noun}${items.length === 1 ? '' : 's'} ${scope} (total ${fc(sum(items))}):\n${rows.join('\n')}${more}${hint}`;
+  }
+
+  // default: sum
+  if (!items.length) return `No ${noun}s found ${scope}.${hint}`;
+  const emoji = entity === 'income' ? '💵' : entity === 'saving' ? '🏦' : '💸';
+  let tail = '';
+  if (entity === 'expense' && items.length > 1) {
+    const tc = topCategory(items);
+    if (tc && !cat) tail = ` Top: ${tc.category} (${fc(tc.amount)}).`;
+  }
+  return `${emoji} ${cap(noun)}s ${scope}: ${fc(sum(items))} across ${items.length} ${noun}${items.length === 1 ? '' : 's'}.${tail}${hint}`;
+}
+
+// ============================================================
+// CONCEPT MATCHING + LIVE KPI VALUES
+// ============================================================
+
+function findKB(q: string): KBEntry | null {
+  for (const e of KNOWLEDGE_BASE) {
+    if (e.keywords.some(kw => q.includes(kw))) return e;
+  }
+  return null;
+}
+
+function liveValueFor(kb: KBEntry, data: BotData): string | null {
+  const k = data.kpis;
+  if (!k) return null;
+  const fc = (n: number) => formatCurrency(n, data.settings?.currency_symbol ?? '₹');
+  switch (kb.title) {
+    case 'Safe to Spend': return `Right now: ${fc(k.safe_to_spend)}`;
+    case 'Savings Rate': return `This month: ${k.savings_rate.toFixed(1)}%`;
+    case 'True Income': return `This month: ${fc(k.true_income)}`;
+    case 'Net Cashflow': return `This month: ${fc(k.net_cashflow)}`;
+    case 'Spendable Balance': return `Right now: ${fc(k.spendable_balance)}`;
+    case 'Credit Card Outstanding': return `Right now: ${fc(k.total_cc_outstanding)}`;
+    default: return null;
+  }
+}
+
+// ============================================================
+// TOP-LEVEL ANSWER ROUTER
+// ============================================================
+
+interface BotReply { value?: string; text?: string; entry?: KBEntry; }
+
+function answer(rawQuery: string, data: BotData): BotReply {
+  const q = rawQuery.toLowerCase().trim();
+  const hasDate = parseDateRange(q) !== null;
+  const intent = classifyIntent(q);
+  const explainSignal = /\b(how is|how are|how does|how do|explain|formula|calculated|definition|what does .* mean|why is|why does)\b/.test(q);
+
+  // 1. Explicit "explain / how is X calculated" → conceptual answer
+  if (explainSignal) {
+    const kb = findKB(q);
+    if (kb) return { value: liveValueFor(kb, data) ?? undefined, entry: kb };
+  }
+
+  // 2. Balance questions (the live number)
+  if (intent === 'balance') return { text: answerBalance(q, data, n => formatCurrency(n, data.settings?.currency_symbol ?? '₹')) };
+
+  // 3. Anything with a date is a data query about that period
+  if (hasDate) return { text: answerDataQuery(q, data) };
+
+  // 4. KPI / concept phrase with no date → concept + live value
+  const kb = findKB(q);
+  if (kb) return { value: liveValueFor(kb, data) ?? undefined, entry: kb };
+
+  // 5. Data signals (count/list/sum/top/avg/summary or an entity word) → data query, default this month
+  const dataSignals = intent !== 'unknown' || /\b(transaction|transactions|expense|expenses|income|saving|savings|spent|earned|paid)\b/.test(q);
+  if (dataSignals) return { text: answerDataQuery(q, data) };
+
+  // 6. Nothing matched
+  return { text: FALLBACK_TEXT };
+}
+
+// ============================================================
+// UI
+// ============================================================
+
+interface Message { role: 'user' | 'bot'; text?: string; value?: string; entry?: KBEntry; }
+
+function BotBubble({ msg }: { msg: Message }) {
   return (
-    <div
-      className="rounded-xl p-3 text-sm max-w-[92%]"
-      style={{ background: 'var(--bg-subtle, #f1f5f9)', color: 'var(--text-primary)' }}
-    >
-      <p className="font-semibold mb-1">{entry.title}</p>
-      {entry.formula && (
-        <code className="block bg-slate-100 dark:bg-slate-800 rounded p-2 text-xs font-mono mt-1 mb-1 whitespace-pre-wrap break-words">
-          {entry.formula}
-        </code>
+    <div className="rounded-xl p-3 text-sm max-w-[92%]" style={{ background: 'var(--bg-subtle, #f1f5f9)', color: 'var(--text-primary)' }}>
+      {msg.value && (
+        <p className="text-base font-bold mb-1 text-blue-600 dark:text-blue-400">{msg.value}</p>
       )}
-      <p className="text-xs leading-relaxed mt-1" style={{ color: 'var(--text-secondary)' }}>
-        {entry.explanation}
-      </p>
-      {entry.example && (
-        <p className="text-xs mt-2 italic" style={{ color: 'var(--text-muted, #94a3b8)' }}>
-          e.g. {entry.example}
-        </p>
+      {msg.entry ? (
+        <>
+          <p className="font-semibold mb-1">{msg.entry.title}</p>
+          {msg.entry.formula && (
+            <code className="block bg-slate-100 dark:bg-slate-800 rounded p-2 text-xs font-mono mt-1 mb-1 whitespace-pre-wrap break-words">
+              {msg.entry.formula}
+            </code>
+          )}
+          <p className="text-xs leading-relaxed mt-1" style={{ color: 'var(--text-secondary)' }}>{msg.entry.explanation}</p>
+          {msg.entry.example && (
+            <p className="text-xs mt-2 italic" style={{ color: 'var(--text-muted, #94a3b8)' }}>e.g. {msg.entry.example}</p>
+          )}
+        </>
+      ) : (
+        <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
       )}
     </div>
   );
 }
 
-// ============================================================
-// WELCOME MESSAGE ENTRY (static)
-// ============================================================
-
-const WELCOME_ENTRY: KBEntry = {
-  keywords: [],
-  title: 'MCS Finance Bot',
-  explanation:
-    "Hi! I'm your MCS Finance Bot 🤖 I can explain any calculation or number in this app. Ask me anything!",
+const WELCOME: Message = {
+  role: 'bot',
+  text:
+    "Hi! I'm your Finance Bot 🤖 — and I can read your real data.\n\nAsk me things like:\n• \"How many transactions last Sunday?\"\n• \"Summary of this month\"\n• \"Biggest expense in June\"\n• \"What's my safe to spend?\"\n\nGo ahead, ask me anything.",
 };
 
-// ============================================================
-// MAIN COMPONENT
-// ============================================================
-
 export function FinanceBot() {
+  const { accounts, transactions, income, categories, fixedExpenses, settings } = useAppStore();
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState('');
-  const [messages, setMessages] = useState<Message[]>([
-    { role: 'bot', text: '', entry: WELCOME_ENTRY },
-  ]);
+  const [messages, setMessages] = useState<Message[]>([WELCOME]);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Scroll to bottom whenever messages change
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, open]);
-
-  // Focus input when opened
-  useEffect(() => {
-    if (open) {
-      setTimeout(() => inputRef.current?.focus(), 150);
+  // Live KPIs for the current month (powers "what's my safe to spend" style answers)
+  const kpis = useMemo<DashboardKPIs | null>(() => {
+    if (!settings) return null;
+    try {
+      const now = new Date();
+      const filter: DateFilter = { view: 'monthly', month: now.getMonth() + 1, year: now.getFullYear() };
+      return calculateDashboardKPIs(accounts, income, transactions, fixedExpenses, filter, settings);
+    } catch {
+      return null;
     }
-  }, [open]);
+  }, [accounts, income, transactions, fixedExpenses, settings]);
 
-  const sendMessage = (text: string) => {
+  const data: BotData = useMemo(
+    () => ({ accounts, transactions, income, categories, settings, kpis }),
+    [accounts, transactions, income, categories, settings, kpis]
+  );
+
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, open]);
+  useEffect(() => { if (open) setTimeout(() => inputRef.current?.focus(), 150); }, [open]);
+
+  const send = (text: string) => {
     const trimmed = text.trim();
     if (!trimmed) return;
-    const entry = findAnswer(trimmed);
-    setMessages(prev => [
-      ...prev,
-      { role: 'user', text: trimmed },
-      { role: 'bot', text: '', entry },
-    ]);
+    const reply = answer(trimmed, data);
+    setMessages(prev => [...prev, { role: 'user', text: trimmed }, { role: 'bot', ...reply }]);
     setInput('');
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      sendMessage(input);
-    }
+  const onKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') { e.preventDefault(); send(input); }
   };
 
   return (
     <>
-      {/* Floating button — bottom-left */}
+      {/* Floating button — bottom-RIGHT */}
       <button
         onClick={() => setOpen(o => !o)}
-        className="fixed bottom-6 left-6 z-50 w-12 h-12 rounded-full bg-blue-600 hover:bg-blue-700 active:scale-95 shadow-lg flex items-center justify-center text-white transition-all duration-200"
-        title="MCS Finance Bot"
+        className="fixed bottom-6 right-6 z-50 w-14 h-14 rounded-full bg-blue-600 hover:bg-blue-700 active:scale-95 shadow-lg flex items-center justify-center text-white transition-all duration-200"
+        title="Finance Bot"
         aria-label="Open Finance Bot"
       >
-        {open ? <X size={20} /> : <Bot size={20} />}
+        {open ? <X size={22} /> : <Bot size={22} />}
       </button>
 
-      {/* Chat panel — slides up from bottom-left */}
+      {/* Chat panel — bottom-RIGHT */}
       {open && (
         <div
-          className="fixed bottom-[5.5rem] left-6 z-50 flex flex-col rounded-2xl shadow-2xl border overflow-hidden animate-fade-in-up"
+          className="fixed bottom-24 right-6 z-50 flex flex-col rounded-2xl shadow-2xl border overflow-hidden animate-fade-in-up"
           style={{
-            width: 380,
-            height: 520,
+            width: 400,
+            maxWidth: 'calc(100vw - 3rem)',
+            height: 560,
+            maxHeight: 'calc(100vh - 8rem)',
             background: 'var(--bg-primary, #ffffff)',
             borderColor: 'var(--border-default, #e2e8f0)',
           }}
@@ -339,23 +643,23 @@ export function FinanceBot() {
           <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: 'var(--border-default, #e2e8f0)' }}>
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900 flex items-center justify-center">
-                <Bot size={16} className="text-blue-600 dark:text-blue-400" />
+                <Sparkles size={16} className="text-blue-600 dark:text-blue-400" />
               </div>
               <div>
-                <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>MCS Finance Bot</p>
-                <p className="text-[10px]" style={{ color: 'var(--text-muted, #94a3b8)' }}>Knows your data</p>
+                <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Finance Bot</p>
+                <p className="text-[10px]" style={{ color: 'var(--text-muted, #94a3b8)' }}>Reads your real data · fully private</p>
               </div>
             </div>
             <button
               onClick={() => setOpen(false)}
               className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
-              aria-label="Close Finance Bot"
+              aria-label="Close"
             >
               <X size={16} style={{ color: 'var(--text-secondary)' }} />
             </button>
           </div>
 
-          {/* Messages area */}
+          {/* Messages */}
           <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
             {messages.map((msg, i) =>
               msg.role === 'bot' ? (
@@ -363,74 +667,51 @@ export function FinanceBot() {
                   <div className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900 flex items-center justify-center flex-shrink-0">
                     <Bot size={12} className="text-blue-600 dark:text-blue-400" />
                   </div>
-                  {msg.entry ? (
-                    <BotBubble entry={msg.entry} />
-                  ) : (
-                    <div
-                      className="rounded-xl p-3 text-sm max-w-[92%]"
-                      style={{ background: 'var(--bg-subtle, #f1f5f9)', color: 'var(--text-primary)' }}
-                    >
-                      {msg.text}
-                    </div>
-                  )}
+                  <BotBubble msg={msg} />
                 </div>
               ) : (
                 <div key={i} className="flex justify-end">
-                  <div className="bg-blue-600 text-white rounded-xl p-3 text-sm max-w-[80%] leading-relaxed">
-                    {msg.text}
-                  </div>
+                  <div className="bg-blue-600 text-white rounded-xl p-3 text-sm max-w-[80%] leading-relaxed whitespace-pre-wrap">{msg.text}</div>
                 </div>
               )
             )}
 
-            {/* Quick chips — only show under the welcome message (when only 1 message) */}
             {messages.length === 1 && (
               <div className="flex flex-wrap gap-1.5 pl-8">
                 {QUICK_CHIPS.map(chip => (
                   <button
                     key={chip}
-                    onClick={() => sendMessage(chip)}
+                    onClick={() => send(chip)}
                     className="text-xs px-2.5 py-1 rounded-full border hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:border-blue-400 dark:hover:border-blue-500 transition-colors"
-                    style={{
-                      borderColor: 'var(--border-default, #e2e8f0)',
-                      color: 'var(--text-secondary)',
-                    }}
+                    style={{ borderColor: 'var(--border-default, #e2e8f0)', color: 'var(--text-secondary)' }}
                   >
                     {chip}
                   </button>
                 ))}
               </div>
             )}
-
             <div ref={bottomRef} />
           </div>
 
-          {/* Input area */}
-          <div
-            className="px-3 py-3 border-t flex items-center gap-2"
-            style={{ borderColor: 'var(--border-default, #e2e8f0)' }}
-          >
+          {/* Input */}
+          <div className="px-3 py-3 border-t flex items-center gap-2" style={{ borderColor: 'var(--border-default, #e2e8f0)' }}>
             <input
               ref={inputRef}
               type="text"
               value={input}
               onChange={e => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Ask about any number..."
+              onKeyDown={onKey}
+              placeholder="Ask anything about your money..."
               className="flex-1 text-sm px-3 py-2 rounded-lg border outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              style={{
-                background: 'var(--bg-subtle, #f8fafc)',
-                borderColor: 'var(--border-default, #e2e8f0)',
-                color: 'var(--text-primary)',
-              }}
+              style={{ background: 'var(--bg-subtle, #f8fafc)', borderColor: 'var(--border-default, #e2e8f0)', color: 'var(--text-primary)' }}
             />
             <button
-              onClick={() => sendMessage(input)}
+              onClick={() => send(input)}
               disabled={!input.trim()}
-              className="w-8 h-8 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center text-white transition-colors"
-              aria-label="Send message"
+              className="w-9 h-9 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center text-white transition-colors flex-shrink-0"
+              aria-label="Send"
             >
-              <Send size={14} />
+              <Send size={15} />
             </button>
           </div>
         </div>
