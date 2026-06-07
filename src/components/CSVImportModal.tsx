@@ -21,20 +21,17 @@ interface ColumnMap {
 }
 
 function parseDate(val: string): string | null {
-  if (!val) return null;
-  // Try native parse first
-  const d = new Date(val);
-  if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
-  // DD/MM/YYYY
-  const parts = val.split('/');
-  if (parts.length === 3) {
-    const [a, b, c] = parts;
-    // Try DD/MM/YYYY
-    const d1 = new Date(`${c}-${b.padStart(2, '0')}-${a.padStart(2, '0')}`);
-    if (!isNaN(d1.getTime())) return d1.toISOString().slice(0, 10);
-    // Try MM/DD/YYYY
-    const d2 = new Date(`${c}-${a.padStart(2, '0')}-${b.padStart(2, '0')}`);
-    if (!isNaN(d2.getTime())) return d2.toISOString().slice(0, 10);
+  const v = val.trim();
+  if (!v) return null;
+  // Try YYYY-MM-DD first (avoid UTC shift by treating as local)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v; // already correct format
+  // Try DD/MM/YYYY
+  const dmy = v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
+  // Fallback: parse with Date but extract local parts to avoid UTC offset
+  const d = new Date(v);
+  if (!isNaN(d.getTime())) {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   }
   return null;
 }
@@ -131,10 +128,24 @@ export function CSVImportModal({ isOpen, onClose, onImported }: Props) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { toast.error('Not authenticated'); setStep('preview'); return; }
 
+    // Dedup: check existing transactions for expense imports
+    const existingTransactions = useAppStore.getState().transactions;
+
     let imported = 0;
+    let skipped = 0;
     const batchSize = 50;
-    for (let i = 0; i < mappedRows.length; i += batchSize) {
-      const batch = mappedRows.slice(i, i + batchSize);
+
+    // Build deduped rows for expense imports
+    const rowsToImport = txType === 'expense'
+      ? mappedRows.filter(r => {
+          const isDup = existingTransactions.some(t => t.date === r.date && t.amount === r.amount);
+          if (isDup) { skipped++; return false; }
+          return true;
+        })
+      : mappedRows;
+
+    for (let i = 0; i < rowsToImport.length; i += batchSize) {
+      const batch = rowsToImport.slice(i, i + batchSize);
       if (txType === 'expense') {
         const rows = batch.map(r => ({
           date: r.date,
@@ -155,16 +166,18 @@ export function CSVImportModal({ isOpen, onClose, onImported }: Props) {
           description: r.description,
           to_account_id: accountId,
           category: 'Import',
+          owner_purpose: 'Personal',
           include_in_true_income: true,
           user_id: user.id,
         }));
         const { error } = await supabase.from('income').insert(rows);
         if (!error) imported += batch.length;
       }
-      setProgress(Math.round(((i + batchSize) / mappedRows.length) * 100));
+      setProgress(Math.round(((i + batchSize) / rowsToImport.length) * 100));
     }
 
-    toast.success(`Imported ${imported} transactions`);
+    const skipMsg = skipped > 0 ? ` (${skipped} duplicate${skipped > 1 ? 's' : ''} skipped)` : '';
+    toast.success(`Imported ${imported} transactions${skipMsg}`);
     onImported(imported);
     onClose();
     setStep('upload');

@@ -21,6 +21,9 @@ export function OnboardingWizard({ isOpen, onComplete }: Props) {
   const [accountType, setAccountType] = useState('bank');
   const [openingBalance, setOpeningBalance] = useState('');
 
+  // Step 1 — created account id (used in Step 2)
+  const [createdAccountId, setCreatedAccountId] = useState('');
+
   // Step 2
   const [incomeAmount, setIncomeAmount] = useState('');
   const [incomeSource, setIncomeSource] = useState('Salary');
@@ -42,7 +45,7 @@ export function OnboardingWizard({ isOpen, onComplete }: Props) {
       const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
-      const { error } = await supabase.from('accounts').insert({
+      const { data: accData, error: accErr } = await supabase.from('accounts').insert({
         name: accountName.trim(),
         account_type: accountType,
         is_active: true,
@@ -52,17 +55,22 @@ export function OnboardingWizard({ isOpen, onComplete }: Props) {
         is_spendable: accountType !== 'savings' && accountType !== 'credit_card',
         sort_order: 0,
         user_id: user.id,
-      });
-      if (error) throw error;
+      }).select().single();
+      if (accErr) throw accErr;
+
+      // Store the new account id so Step 2 can use it
+      setCreatedAccountId(accData.id);
 
       if (parseFloat(openingBalance) > 0) {
         const { error: e2 } = await supabase.from('transactions').insert({
-          date: new Date().toISOString().slice(0, 10),
-          amount: parseFloat(openingBalance),
           type: 'initial_balance',
-          category: 'Initial Balance',
+          amount: parseFloat(openingBalance),
+          to_account_id: accData.id,
+          date: new Date().toISOString().slice(0, 10),
           period: new Date().toISOString().slice(0, 7),
           user_id: user.id,
+          category: 'Initial Balance',
+          description: 'Opening balance',
         });
         if (e2) console.warn('Opening balance insert failed:', e2.message);
       }
@@ -88,9 +96,9 @@ export function OnboardingWizard({ isOpen, onComplete }: Props) {
         amount: amt,
         source: incomeSource,
         category: incomeSource,
-        to_account_id: null,
+        to_account_id: createdAccountId || null,
         include_in_true_income: true,
-        owner_purpose: 'personal',
+        owner_purpose: 'Personal',
         user_id: user.id,
       });
       if (error) throw error;

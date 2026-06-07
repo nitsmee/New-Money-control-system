@@ -25,8 +25,16 @@ export function QuickAddModal({ isOpen, onClose, onSaved }: Props) {
   const [fromAccountId, setFromAccountId] = useState('');
   const [saving, setSaving] = useState(false);
 
+  const [toAccountId, setToAccountId] = useState('');
+
   const { accounts } = useAppStore();
   const activeAccounts = accounts.filter(a => a.is_active && !a.is_credit_card);
+
+  // Savings accounts: prefer include_in_goal_savings or 'saving' in account_type; fall back to all non-CC
+  const savingsAccounts = (() => {
+    const preferred = activeAccounts.filter(a => a.include_in_goal_savings || (a.account_type || '').toLowerCase().includes('saving'));
+    return preferred.length > 0 ? preferred : activeAccounts;
+  })();
 
   async function handleSave() {
     const amt = parseFloat(amount);
@@ -38,28 +46,35 @@ export function QuickAddModal({ isOpen, onClose, onSaved }: Props) {
       toast.error('Select an account');
       return;
     }
+    if (type === 'saving' && !toAccountId) {
+      toast.error('Please select a savings account');
+      return;
+    }
     setSaving(true);
     try {
       const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
-      const { error } = await supabase.from('transactions').insert({
+      const { data, error } = await supabase.from('transactions').insert({
         date,
         amount: amt,
         type,
         category,
         from_account_id: fromAccountId,
+        to_account_id: type === 'saving' ? (toAccountId || null) : null,
         period: date.slice(0, 7),
         user_id: user.id,
-      });
+      }).select().single();
       if (error) throw error;
 
+      useAppStore.getState().addTransaction(data);
       toast.success('Transaction saved');
       onSaved();
       onClose();
       setAmount('');
       setDate(today);
+      setToAccountId('');
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Failed to save');
     } finally {
@@ -159,6 +174,23 @@ export function QuickAddModal({ isOpen, onClose, onSaved }: Props) {
               ))}
             </select>
           </div>
+
+          {/* To Account (Savings) — only shown when type is 'saving' */}
+          {type === 'saving' && (
+            <div className="form-group">
+              <label className="form-label">To Account (Savings)</label>
+              <select
+                className="form-select"
+                value={toAccountId}
+                onChange={e => setToAccountId(e.target.value)}
+              >
+                <option value="">Select savings account…</option>
+                {savingsAccounts.map(a => (
+                  <option key={a.id} value={a.id}>{a.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <button
             onClick={handleSave}

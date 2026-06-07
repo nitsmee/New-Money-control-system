@@ -124,6 +124,7 @@ export const useAppStore = create<AppState>()(
           { data: budgets },
           { data: goals },
           { data: settings },
+          { data: recurringIncomeData },
         ] = await Promise.all([
           sb.from('accounts').select('*').eq('user_id', userId).order('sort_order'),
           sb.from('account_types').select('*').eq('user_id', userId).order('sort_order'),
@@ -136,10 +137,8 @@ export const useAppStore = create<AppState>()(
           sb.from('budget').select('*').eq('user_id', userId),
           sb.from('goals').select('*').eq('user_id', userId).order('priority'),
           sb.from('user_settings').select('*').eq('user_id', userId).single(),
+          sb.from('recurring_income').select('*').eq('user_id', userId).order('created_at'),
         ]);
-
-        const { data: riData } = await sb.from('recurring_income').select('*').eq('user_id', userId).order('created_at');
-        if (riData) set({ recurringIncome: riData });
 
         set({
           accounts: accounts ?? [],
@@ -153,6 +152,7 @@ export const useAppStore = create<AppState>()(
           budgets: budgets ?? [],
           goals: goals ?? [],
           settings: settings ?? null,
+          recurringIncome: recurringIncomeData ?? [],
           isLoading: false,
         });
       },

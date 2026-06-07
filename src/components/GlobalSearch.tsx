@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { Search, X } from 'lucide-react';
 import { useAppStore } from '@/lib/store/appStore';
@@ -40,7 +40,7 @@ export function GlobalSearch() {
     }
   }, [open]);
 
-  const results: SearchResult[] = useCallback(() => {
+  const results: SearchResult[] = useMemo(() => {
     if (!query.trim()) return [];
     const q = query.toLowerCase();
     const out: SearchResult[] = [];
@@ -83,7 +83,7 @@ export function GlobalSearch() {
       }));
 
     return out;
-  }, [query, transactions, accounts, budgets])();
+  }, [query, transactions, accounts, budgets]);
 
   function handleKey(e: React.KeyboardEvent) {
     if (e.key === 'ArrowDown') {

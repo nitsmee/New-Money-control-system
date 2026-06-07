@@ -1,7 +1,7 @@
 'use client';
 import { useState, useMemo } from 'react';
 import { useAppStore } from '@/lib/store/appStore';
-import { calculateAccountBalances, calculateBudgetStatus, buildMonthlyTrends, getCategorySpend, formatCurrency, accountRole } from '@/lib/utils/calculations';
+import { calculateAccountBalances, calculateBudgetStatus, getCategorySpend, formatCurrency, accountRole } from '@/lib/utils/calculations';
 import { format, endOfMonth } from 'date-fns';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, LineChart, Line, PieChart, Pie, Cell, ResponsiveContainer, AreaChart, Area } from 'recharts';
 import { Download, Calendar, TrendingUp, TrendingDown, Wallet } from 'lucide-react';
@@ -74,7 +74,17 @@ export default function ReportsPage() {
     return { totalIncome, totalExpense, totalSavings, ccBills, familyExpense };
   }, [yearlyIncome, yearlyTx, accounts]);
 
-  const trends = useMemo(() => buildMonthlyTrends(income.filter(i => i.date.startsWith(String(selYear))), transactions.filter(t => t.date.startsWith(String(selYear))), 12), [income, transactions, selYear]);
+  const trends = useMemo(() => {
+    return Array.from({ length: 12 }, (_, i) => {
+      const m = i + 1;
+      const start = `${selYear}-${String(m).padStart(2,'0')}-01`;
+      const end = format(endOfMonth(new Date(selYear, i)), 'yyyy-MM-dd');
+      const mIncome = income.filter(x => x.date >= start && x.date <= end).reduce((s,x) => s+x.amount, 0);
+      const mExpense = transactions.filter(t => t.type==='expense' && t.date >= start && t.date <= end).reduce((s,t) => s+t.amount, 0);
+      const mSavings = transactions.filter(t => t.type==='saving' && t.date >= start && t.date <= end).reduce((s,t) => s+t.amount, 0);
+      return { month: MONTHS[i], year: selYear, income: mIncome, expense: mExpense, savings: mSavings, net: mIncome - mExpense - mSavings };
+    });
+  }, [income, transactions, selYear]);
   const yearlyCatSpend = useMemo(() => getCategorySpend(yearlyTx.filter(t => t.type==='expense'), []), [yearlyTx]);
 
   const categoryTrendData = useMemo(() => {

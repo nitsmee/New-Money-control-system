@@ -1,11 +1,14 @@
 'use client';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useAppStore } from '@/lib/store/appStore';
 import { createClient } from '@/lib/supabase/client';
 import { RecurringIncome } from '@/types';
 import { formatCurrency, safeDueDate } from '@/lib/utils/calculations';
+import { runAutoProcessIncome } from '@/lib/utils/autoProcessIncome';
 import toast from 'react-hot-toast';
 import { Plus, Pencil, Trash2, X, Check, RefreshCw } from 'lucide-react';
+
+let recurringIncomePageAutoRan = false;
 
 type FormState = {
   name: string;
@@ -66,6 +69,25 @@ export default function RecurringIncomePage() {
 
   const sb = createClient();
   const sym = settings?.currency_symbol ?? '₹';
+
+  // Auto-process any due recurring income entries on page load.
+  useEffect(() => {
+    if (recurringIncomePageAutoRan || recurringIncome.length === 0) return;
+    recurringIncomePageAutoRan = true;
+    (async () => {
+      try {
+        const { data: { user } } = await sb.auth.getUser();
+        if (!user) return;
+        const state = useAppStore.getState();
+        const r = await runAutoProcessIncome(sb, state.recurringIncome, user.id);
+        if (r.processed > 0) {
+          toast.success(`Auto-processed ${r.processed} recurring income entr${r.processed > 1 ? 'ies' : 'y'}`);
+          state.loadAll(user.id);
+        }
+      } catch { /* stay silent */ }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recurringIncome.length]);
 
   // Non-CC active accounts for income destination
   const eligibleAccounts = useMemo(

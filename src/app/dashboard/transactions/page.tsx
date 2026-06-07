@@ -226,7 +226,8 @@ export default function TransactionsPage() {
         const matches = transactions.filter(t =>
           t.amount === +form.amount &&
           t.date >= dateStr &&
-          t.type === form.type
+          t.type === form.type &&
+          t.category === form.category
         );
         if (matches.length > 0) {
           setDuplicateMatches(matches);

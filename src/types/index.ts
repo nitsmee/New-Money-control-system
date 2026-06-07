@@ -122,6 +122,9 @@ export interface Income {
   to_account_id: string;
   notes?: string;
   include_in_true_income: boolean;
+  period?: string;                    // YYYY-MM, set for auto-processed recurring income
+  recurring_income_id?: string | null; // links back to recurring_income template
+  description?: string;
   created_at: string;
   updated_at: string;
   // joined

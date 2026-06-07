@@ -261,16 +261,19 @@ export function calculateDashboardKPIs(
     spendable_balance - bank_paid_upcoming - total_cc_outstanding - settings.safe_spend_buffer;
 
   // Savings rate
-  const savings_rate = true_income > 0 ? (total_savings / true_income) * 100 : 0;
+  const savings_rate = true_income > 0 ? Math.min(100, (total_savings / true_income) * 100) : 0;
 
-  // Month-over-month deltas
-  const prevMonth = filter.month && filter.year
-    ? (filter.month === 1 ? { month: 12, year: filter.year - 1 } : { month: filter.month - 1, year: filter.year })
-    : (() => { const d = new Date(); return d.getMonth() === 0 ? { month: 12, year: d.getFullYear()-1 } : { month: d.getMonth(), year: d.getFullYear() }; })();
-  const prevTotals = getMonthTotals(allIncome, allTransactions, prevMonth.month, prevMonth.year);
-  const mom_income_delta = total_income - prevTotals.income;
-  const mom_expense_delta = total_expense - prevTotals.expense;
-  const mom_savings_delta = total_savings - prevTotals.savings;
+  // Month-over-month deltas — only meaningful for a specific calendar month view
+  let mom_income_delta = 0, mom_expense_delta = 0, mom_savings_delta = 0;
+  if (filter.view === 'monthly' && filter.month && filter.year) {
+    const pm = filter.month === 1
+      ? { month: 12, year: filter.year - 1 }
+      : { month: filter.month - 1, year: filter.year };
+    const prevTotals = getMonthTotals(allIncome, allTransactions, pm.month, pm.year);
+    mom_income_delta = total_income - prevTotals.income;
+    mom_expense_delta = total_expense - prevTotals.expense;
+    mom_savings_delta = total_savings - prevTotals.savings;
+  }
 
   return {
     total_bank_balance,
@@ -362,8 +365,8 @@ export function calculateBudgetStatus(
     else if (actualDiscretionary > allowedDiscretionary * 0.9) status = 'orange';
     else status = 'green';
 
-    const daily_spend_rate = dayOfMonth > 0 ? actual_till_date / dayOfMonth : 0;
-    const projected_month_end = actual_till_date + (daily_spend_rate * days_remaining);
+    const daily_spend_rate = dayOfMonth > 0 ? actualDiscretionary / dayOfMonth : 0;
+    const projected_month_end = postedFixed + (daily_spend_rate * daysInMonth);
 
     return {
       category: budget.category,

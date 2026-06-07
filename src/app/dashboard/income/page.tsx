@@ -1,5 +1,6 @@
 'use client';
 import { useState, useMemo } from 'react';
+import { format, endOfMonth } from 'date-fns';
 import { useAppStore } from '@/lib/store/appStore';
 import { createClient } from '@/lib/supabase/client';
 import { Income } from '@/types';
@@ -37,7 +38,7 @@ export default function IncomePage() {
 
   const filtered = useMemo(() => {
     const start = `${filterYear}-${String(filterMonth).padStart(2, '0')}-01`;
-    const end = `${filterYear}-${String(filterMonth).padStart(2, '0')}-31`;
+    const end = format(endOfMonth(new Date(filterYear, filterMonth - 1)), 'yyyy-MM-dd');
     return income.filter(i => i.date >= start && i.date <= end).sort((a, b) => b.date.localeCompare(a.date));
   }, [income, filterMonth, filterYear]);
 

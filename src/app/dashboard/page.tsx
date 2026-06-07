@@ -6,6 +6,7 @@ import {
   buildMonthlyTrends, getCategorySpend, generateAlerts, formatCurrency, formatDate, accountRole, safeDueDate
 } from '@/lib/utils/calculations';
 import { runAutoProcess } from '@/lib/utils/autoProcess';
+import { runAutoProcessIncome } from '@/lib/utils/autoProcessIncome';
 import { createClient } from '@/lib/supabase/client';
 import toast from 'react-hot-toast';
 import {
@@ -61,9 +62,10 @@ interface DetailData {
 }
 
 let dashboardAutoRan = false;
+let incomeAutoRan = false;
 
 export default function DashboardPage() {
-  const { accounts, income, transactions, fixedExpenses, budgets, goals, categories, settings, dateFilter, setDateFilter, isLoading } = useAppStore();
+  const { accounts, income, transactions, fixedExpenses, budgets, goals, categories, settings, dateFilter, setDateFilter, isLoading, recurringIncome } = useAppStore();
 
   const now = new Date();
   const [selMonth, setSelMonth] = useState(dateFilter.month ?? now.getMonth() + 1);
@@ -168,6 +170,26 @@ export default function DashboardPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, fixedExpenses.length]);
 
+  // Auto-process any due recurring income entries on load.
+  useEffect(() => {
+    if (isLoading || incomeAutoRan || recurringIncome.length === 0) return;
+    incomeAutoRan = true;
+    (async () => {
+      try {
+        const sb = createClient();
+        const { data: { user } } = await sb.auth.getUser();
+        if (!user) return;
+        const state = useAppStore.getState();
+        const r = await runAutoProcessIncome(sb, state.recurringIncome, user.id);
+        if (r.processed > 0) {
+          toast.success(`Auto-processed ${r.processed} recurring income entr${r.processed > 1 ? 'ies' : 'y'}`);
+          state.loadAll(user.id);
+        }
+      } catch { /* stay silent on load */ }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoading, recurringIncome.length]);
+
   if (isLoading) return <LoadingSkeleton />;
 
   // Net-cashflow breakdown rows — savings split out from investments.
@@ -182,6 +204,7 @@ export default function DashboardPage() {
   const momIncDelta = kpis?.mom_income_delta ?? 0;
   const momExpDelta = kpis?.mom_expense_delta ?? 0;
   const momSavDelta = kpis?.mom_savings_delta ?? 0;
+  const momNetDelta = (kpis?.mom_income_delta ?? 0) - (kpis?.mom_expense_delta ?? 0) - (kpis?.mom_savings_delta ?? 0);
   const savingsRate = kpis?.savings_rate ?? 0;
 
   // ---- Card definitions (value + the detail panel each opens) ----
@@ -368,9 +391,9 @@ export default function DashboardPage() {
           let momDelta: number | null = null;
           let momDeltaPositiveIsGood = true;
           if (c.label === 'Income this month') { momDelta = momIncDelta; momDeltaPositiveIsGood = true; }
-          else if (c.label === 'Net cashflow') { momDelta = momSavDelta; momDeltaPositiveIsGood = true; }
-          // Expense delta shown on Safe-to-spend (spending proxy): positive = spent more = bad
-          else if (c.label === 'Safe to spend') { momDelta = momExpDelta; momDeltaPositiveIsGood = false; }
+          else if (c.label === 'Net cashflow') { momDelta = momNetDelta; momDeltaPositiveIsGood = true; }
+          // Safe to spend is a balance figure — no MoM delta chip
+          else if (c.label === 'Safe to spend') { momDelta = null; }
 
           const showDelta = momDelta !== null && Math.abs(momDelta) > 0;
           const deltaGood = momDelta !== null && (momDeltaPositiveIsGood ? momDelta > 0 : momDelta < 0);

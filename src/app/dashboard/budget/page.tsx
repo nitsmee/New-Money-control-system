@@ -12,7 +12,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 export default function BudgetPage() {
-  const { budgets, categories, owners, transactions, income, fixedExpenses, addBudget, updateBudget, removeBudget, settings } = useAppStore();
+  const { budgets, categories, owners, transactions, fixedExpenses, addBudget, updateBudget, removeBudget, settings } = useAppStore();
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Budget | null>(null);
   const [form, setForm] = useState({ category: '', owner_purpose: '', monthly_budget: 0, include_in_budget: true, notes: '' });
@@ -34,7 +34,7 @@ export default function BudgetPage() {
 
   const budgetStatuses = useMemo(() =>
     calculateBudgetStatus(budgets, transactions, fixedExpenses, statusDate, selMonth, selYear),
-    [budgets, transactions, income, fixedExpenses, statusDate, selMonth, selYear]
+    [budgets, transactions, fixedExpenses, statusDate, selMonth, selYear]
   );
 
   const summary = useMemo(() => ({
