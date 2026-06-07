@@ -10,7 +10,7 @@ import {
 import { useAppStore } from '@/lib/store/appStore';
 import { createClient } from '@/lib/supabase/client';
 import {
-  calculateAccountBalances, calculateDashboardKPIs, formatCurrency,
+  calculateAccountBalances, calculateDashboardKPIs, formatCurrency, getMonthTotals,
 } from '@/lib/utils/calculations';
 import type {
   Account, Transaction, Income, Category, Goal, Budget,
@@ -379,8 +379,22 @@ function answerAffordability(q: string, data: BotData): string | null {
   const pool = data.balances
     .filter(b => !b.is_credit_card && b.account.is_active && b.account.include_in_goal_savings)
     .reduce((s, b) => s + b.balance, 0);
+  // Saving capacity from the last 3 COMPLETED months (true income − expenses),
+  // averaged. This is far more stable than the current partial month, which
+  // understates expenses (and so overstates capacity) early in the month.
+  const now = new Date();
+  let sumCap = 0, sumInc = 0, sumExp = 0, monthsWithData = 0;
+  for (let i = 1; i <= 3; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const mt = getMonthTotals(data.income, data.transactions, d.getMonth() + 1, d.getFullYear());
+    if (mt.income > 0 || mt.expense > 0) { sumCap += mt.trueIncome - mt.expense; sumInc += mt.trueIncome; sumExp += mt.expense; monthsWithData++; }
+  }
   const k = data.kpis;
-  const monthlyCapacity = k ? (k.true_income - k.total_expense) : 0;
+  // Fall back to the current month only for brand-new users with no history.
+  const monthlyCapacity = monthsWithData > 0 ? sumCap / monthsWithData : (k ? k.true_income - k.total_expense : 0);
+  const avgInc = monthsWithData > 0 ? sumInc / monthsWithData : (k?.true_income ?? 0);
+  const avgExp = monthsWithData > 0 ? sumExp / monthsWithData : (k?.total_expense ?? 0);
+  const basis = monthsWithData > 0 ? `avg of last ${monthsWithData} month${monthsWithData === 1 ? '' : 's'}` : 'this month so far';
   const label = itemName ? `the ${itemName}` : 'it';
 
   if (pool >= price) {
@@ -391,13 +405,13 @@ function answerAffordability(q: string, data: BotData): string | null {
 
   const gap = price - pool;
   if (monthlyCapacity <= 0) {
-    return `❌ **Not yet.** ${cap(label)} costs ${fc(price)}; you have ${fc(pool)} saved (short by ${fc(gap)}).\n\nRight now your monthly expenses (${fc(k?.total_expense ?? 0)}) are at or above your income (${fc(k?.true_income ?? 0)}), so you aren't adding to savings.\n\n**How to get there:**\n• Free up some monthly surplus first${topCutTip(data, fc)}\n• Or boost income\n• Even saving ${fc(Math.max(5000, Math.round(price * 0.05)))}/month gets this moving.\n\n_Not financial advice._`;
+    return `❌ **Not yet.** ${cap(label)} costs ${fc(price)}; you have ${fc(pool)} saved (short by ${fc(gap)}).\n\nYour typical monthly spending (${fc(avgExp)}, ${basis}) is at or above your income (${fc(avgInc)}), so you aren't building savings right now.\n\n**How to get there:**\n• Free up some monthly surplus first${topCutTip(data, fc)}\n• Or boost income\n• Even saving ${fc(Math.max(5000, Math.round(price * 0.05)))}/month gets this moving.\n\n_Not financial advice._`;
   }
 
   const months = Math.ceil(gap / monthlyCapacity);
   const when = format(addMonths(new Date(), months), 'MMMM yyyy');
   const faster = Math.ceil(gap / (monthlyCapacity * 1.5));
-  return `🟡 **Not right now — but it's within reach.** ${cap(label)} costs ${fc(price)}; you have ${fc(pool)} (short by ${fc(gap)}).\n\n• Your saving capacity: ~${fc(monthlyCapacity)}/month\n• At that pace: **~${months} month${months === 1 ? '' : 's'}** → around ${when}\n\n**How to manage it:**\n• Save ${fc(monthlyCapacity)}/month consistently${topCutTip(data, fc)}\n• Push savings to ${fc(Math.round(monthlyCapacity * 1.5))}/month and you'd get there in ~${faster} months\n• If you need it sooner, weigh an EMI against your monthly budget\n\n_Not financial advice — based on your recorded numbers._`;
+  return `🟡 **Not right now — but it's within reach.** ${cap(label)} costs ${fc(price)}; you have ${fc(pool)} (short by ${fc(gap)}).\n\n• Your typical saving capacity: ~${fc(monthlyCapacity)}/month (${basis})\n• At that pace: **~${months} month${months === 1 ? '' : 's'}** → around ${when}\n\n**How to manage it:**\n• Save ${fc(monthlyCapacity)}/month consistently${topCutTip(data, fc)}\n• Push savings to ${fc(Math.round(monthlyCapacity * 1.5))}/month and you'd get there in ~${faster} months\n• If you need it sooner, weigh an EMI against your monthly budget\n\n_Not financial advice — based on your recorded numbers._`;
 }
 
 // "show me my last 10 transactions", "recent expenses", "latest income".

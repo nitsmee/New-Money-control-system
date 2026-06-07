@@ -362,7 +362,15 @@ export function calculateBudgetStatus(
     else status = 'green';
 
     const daily_spend_rate = dayOfMonth > 0 ? actualDiscretionary / dayOfMonth : 0;
-    const projected_month_end = postedFixed + (daily_spend_rate * daysInMonth);
+    // Forecast that blends your planned discretionary budget with your actual
+    // pace. Early in the month we lean on the plan (so one big day-1 purchase
+    // no longer extrapolates to the whole month); as the month progresses we
+    // lean on real pace. Never projects below what you've already spent.
+    const paceProjectedDiscretionary = daily_spend_rate * daysInMonth;
+    const monthProgress = daysInMonth > 0 ? Math.min(1, dayOfMonth / daysInMonth) : 1;
+    const blendedDiscretionary =
+      monthProgress * paceProjectedDiscretionary + (1 - monthProgress) * discretionaryMonthly;
+    const projected_month_end = postedFixed + Math.max(actualDiscretionary, blendedDiscretionary);
 
     return {
       category: budget.category,
