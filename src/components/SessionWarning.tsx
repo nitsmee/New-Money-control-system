@@ -57,7 +57,7 @@ export function SessionWarning() {
   if (!show) return null;
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 dark:bg-amber-900/30 dark:border-amber-700 px-4 py-3 shadow-lg max-w-xs">
+    <div className="fixed bottom-4 left-4 z-50 flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 dark:bg-amber-900/30 dark:border-amber-700 px-4 py-3 shadow-lg max-w-xs">
       <AlertTriangle size={16} className="text-amber-600 flex-shrink-0" />
       <div className="flex-1">
         <p className="text-sm font-semibold text-amber-800 dark:text-amber-200">Session expiring soon</p>
