@@ -68,23 +68,39 @@ async function callGroq(key: string, ctx: string, question: string): Promise<str
 }
 
 async function callGemini(key: string, ctx: string, question: string): Promise<string> {
-  const model = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-      contents: [
-        { role: 'user', parts: [{ text: `${ctx}\n\nQuestion: ${question}` }] },
-      ],
-    }),
+  // Google retires model names over time (e.g. gemini-1.5-flash → 2.0/2.5).
+  // Try the configured model first, then current free-tier flash models, so
+  // the bot self-heals across renames. We only advance to the next candidate
+  // on a 404 (model-not-found); other errors stop and surface.
+  const candidates = Array.from(new Set([
+    process.env.GEMINI_MODEL,
+    'gemini-2.0-flash',
+    'gemini-flash-latest',
+    'gemini-2.5-flash',
+    'gemini-1.5-flash',
+  ].filter(Boolean))) as string[];
+
+  const payload = JSON.stringify({
+    systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+    contents: [{ role: 'user', parts: [{ text: `${ctx}\n\nQuestion: ${question}` }] }],
   });
-  if (!resp.ok) {
-    throw new Error(`Gemini API error ${resp.status}: ${(await resp.text()).slice(0, 300)}`);
+
+  let lastErr = 'no model available';
+  for (const model of candidates) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: payload,
+    });
+    if (resp.ok) {
+      const data: GeminiResponse = await resp.json();
+      return data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+    }
+    lastErr = `${resp.status}: ${(await resp.text()).slice(0, 200)}`;
+    if (resp.status !== 404) break; // real error (bad key, quota…) — stop trying
   }
-  const data: GeminiResponse = await resp.json();
-  return data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+  throw new Error(`Gemini API error ${lastErr}`);
 }
 
 async function callAnthropic(key: string, ctx: string, question: string): Promise<string> {
