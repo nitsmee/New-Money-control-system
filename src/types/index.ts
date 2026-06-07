@@ -45,6 +45,7 @@ export const PRIORITY_LABELS: Record<number, string> = {
 
 // --- Database Models ---
 
+// Note: fetched on-demand, not stored in Zustand
 export interface AccountType {
   id: string;
   user_id: string;
@@ -102,6 +103,7 @@ export interface Category {
   updated_at: string;
 }
 
+// Note: fetched on-demand, not stored in Zustand
 export interface IncomeSource {
   id: string;
   user_id: string;
@@ -304,7 +306,6 @@ export interface DashboardKPIs {
   // Computed
   net_cashflow: number;
   safe_to_spend: number;
-  remaining_budget: number;
   savings_rate: number;
   mom_income_delta: number;
   mom_expense_delta: number;

@@ -8,7 +8,6 @@ import toast from 'react-hot-toast';
 import { Plus, Pencil, Trash2, X, Check, Target, CheckCircle, AlertTriangle, Clock, TrendingUp, Flag } from 'lucide-react';
 import { RadialBarChart, RadialBar, ResponsiveContainer } from 'recharts';
 
-const GOAL_TYPES = ['Car','Bike','Motorcycle','TV','Mobile / Smartphone','Laptop / Computer','Travel / Vacation','Home Appliance','Furniture','Electronics','Education','Emergency Fund','Home Purchase','Investment','Gadgets','Other'];
 const PRIORITY_LABELS: Record<number, string> = { 1:'Critical', 2:'High', 3:'Medium', 4:'Low', 5:'Optional' };
 const EMPTY: Omit<Goal, 'id'|'user_id'|'created_at'|'updated_at'> = {
   name:'', goal_type:'', priority:3, expected_cost:0, planned_purchase_date:undefined,
@@ -203,10 +202,7 @@ export default function GoalsPage() {
                 </div>
                 <div className="form-group">
                   <label className="form-label">Goal Type</label>
-                  <select className="form-select" value={form.goal_type} onChange={e => setForm({...form, goal_type:e.target.value})}>
-                    <option value="">Select…</option>
-                    {GOAL_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-                  </select>
+                  <input type="text" className="form-input" placeholder="e.g. Car, Travel, TV…" value={form.goal_type} onChange={e => setForm({...form, goal_type:e.target.value})} />
                 </div>
                 <div className="form-group">
                   <label className="form-label">Priority</label>

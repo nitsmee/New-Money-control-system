@@ -8,6 +8,8 @@ import { formatCurrency, calculateAccountBalances, accountRole } from '@/lib/uti
 import toast from 'react-hot-toast';
 import { Plus, Pencil, Trash2, X, Check } from 'lucide-react';
 
+const COMMON_SOURCES = ['Salary', 'Freelance', 'Business', 'Rental', 'Dividend', 'Bonus', 'Gift', 'Reimbursement', 'Other'];
+
 const EMPTY: Omit<Income, 'id' | 'user_id' | 'created_at' | 'updated_at'> = {
   date: new Date().toISOString().split('T')[0],
   amount: 0,
@@ -20,7 +22,7 @@ const EMPTY: Omit<Income, 'id' | 'user_id' | 'created_at' | 'updated_at'> = {
 };
 
 export default function IncomePage() {
-  const { income, accounts, categories, owners, incomeSources, addIncome, updateIncome, removeIncome, settings, transactions, addTransaction } = useAppStore();
+  const { income, accounts, categories, owners, addIncome, updateIncome, removeIncome, settings, transactions, addTransaction } = useAppStore();
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Income | null>(null);
   const [form, setForm] = useState({ ...EMPTY });
@@ -215,7 +217,7 @@ export default function IncomePage() {
                 <div className="form-group">
                   <label className="form-label">Source</label>
                   <input type="text" list="sources" className="form-input" placeholder="e.g. Employer" value={form.source} onChange={e => setForm({ ...form, source: e.target.value })} />
-                  <datalist id="sources">{incomeSources.filter(s => s.is_active).map(s => <option key={s.id} value={s.name} />)}</datalist>
+                  <datalist id="sources">{COMMON_SOURCES.map(s => <option key={s} value={s} />)}</datalist>
                 </div>
                 <div className="form-group">
                   <label className="form-label">To Account *</label>

@@ -1,18 +1,16 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import {
-  Account, AccountType, Category, Owner, Income, Transaction,
-  FixedExpense, Budget, Goal, UserSettings, IncomeSource, DateFilter, RecurringIncome
+  Account, Category, Owner, Income, Transaction,
+  FixedExpense, Budget, Goal, UserSettings, DateFilter, RecurringIncome
 } from '@/types';
 import { createClient } from '@/lib/supabase/client';
 
 interface AppState {
   // Master data
   accounts: Account[];
-  accountTypes: AccountType[];
   categories: Category[];
   owners: Owner[];
-  incomeSources: IncomeSource[];
 
   // Transactions
   income: Income[];
@@ -83,10 +81,8 @@ export const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
       accounts: [],
-      accountTypes: [],
       categories: [],
       owners: [],
-      incomeSources: [],
       income: [],
       transactions: [],
       fixedExpenses: [],
@@ -114,10 +110,8 @@ export const useAppStore = create<AppState>()(
 
         const [
           { data: accounts },
-          { data: accountTypes },
           { data: categories },
           { data: owners },
-          { data: incomeSources },
           { data: income },
           { data: transactions },
           { data: fixedExpenses },
@@ -127,10 +121,8 @@ export const useAppStore = create<AppState>()(
           { data: recurringIncomeData },
         ] = await Promise.all([
           sb.from('accounts').select('*').eq('user_id', userId).order('sort_order'),
-          sb.from('account_types').select('*').eq('user_id', userId).order('sort_order'),
           sb.from('categories').select('*').eq('user_id', userId).order('sort_order'),
           sb.from('owners').select('*').eq('user_id', userId).order('sort_order'),
-          sb.from('income_sources').select('*').eq('user_id', userId).order('sort_order'),
           sb.from('income').select('*').eq('user_id', userId).order('date', { ascending: false }),
           sb.from('transactions').select('*').eq('user_id', userId).order('date', { ascending: false }),
           sb.from('fixed_expenses').select('*').eq('user_id', userId).order('sort_order'),
@@ -142,10 +134,8 @@ export const useAppStore = create<AppState>()(
 
         set({
           accounts: accounts ?? [],
-          accountTypes: accountTypes ?? [],
           categories: categories ?? [],
           owners: owners ?? [],
-          incomeSources: incomeSources ?? [],
           income: income ?? [],
           transactions: transactions ?? [],
           fixedExpenses: fixedExpenses ?? [],

@@ -238,9 +238,6 @@ export function calculateDashboardKPIs(
     })
     .reduce((s, fe) => s + fe.amount, 0);
 
-  // Remaining budget
-  const remaining_budget = 0; // calculated separately in budget module
-
   // Safe to spend — reserve only BANK/cash-paid upcoming bills here. Bills
   // charged to a credit card are captured in the card outstanding when they
   // post, so reserving them here as well would double-count them (F8).
@@ -289,7 +286,6 @@ export function calculateDashboardKPIs(
     cc_bills_paid,
     net_cashflow,
     safe_to_spend,
-    remaining_budget,
     upcoming_fixed_expenses,
     upcoming_cc_dues: total_cc_outstanding,
     savings_rate,
