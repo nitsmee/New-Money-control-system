@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client';
 import { Transaction, TransactionType, TRANSACTION_TYPES } from '@/types';
 import { formatCurrency, currencySymbol, convertAmount } from '@/lib/utils/calculations';
 import { useDisplayCurrency } from '@/lib/useDisplayCurrency';
-import { format, endOfMonth } from 'date-fns';
+import { format, endOfMonth, startOfMonth, subMonths, startOfYear, endOfYear, subYears } from 'date-fns';
 import toast from 'react-hot-toast';
 import { Plus, Pencil, Trash2, X, Check, Upload } from 'lucide-react';
 import { DuplicateWarning } from '@/components/DuplicateWarning';
@@ -46,9 +46,9 @@ const TYPE_COLOR: Record<TransactionType, string> = {
   saving: 'badge-blue', initial_balance: 'badge-green', initial_cc_outstanding: 'badge-red', adjustment: 'badge-gray',
 };
 
-const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-// Rolling year list — auto-extends every year so the app never caps out.
-const YEARS = Array.from({ length: (new Date().getFullYear() + 6) - 2023 }, (_, i) => 2023 + i);
+// Quick date-range presets. A custom From/To range covers everything else
+// (a single month, several months, a whole year, etc.).
+const DATE_PRESETS = ['This Month', 'Last Month', 'Last 3 Months', 'This Year', 'Last Year', 'All Time', 'Custom'];
 
 export default function TransactionsPage() {
   const { transactions, accounts, categories, owners, addTransaction, updateTransaction, removeTransaction, settings } = useAppStore();
@@ -57,8 +57,9 @@ export default function TransactionsPage() {
   const [form, setForm] = useState({ ...EMPTY });
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
-  const [filterMonth, setFilterMonth] = useState(new Date().getMonth() + 1);
-  const [filterYear, setFilterYear] = useState(new Date().getFullYear());
+  const [fromDate, setFromDate] = useState(() => format(startOfMonth(new Date()), 'yyyy-MM-dd'));
+  const [toDate, setToDate] = useState(() => format(endOfMonth(new Date()), 'yyyy-MM-dd'));
+  const [datePreset, setDatePreset] = useState('This Month');
   const [filterType, setFilterType] = useState<TransactionType | 'all'>('all');
   // Extra filters + sorting
   const [filterCategory, setFilterCategory] = useState('');
@@ -96,6 +97,19 @@ export default function TransactionsPage() {
   const curOf = (id?: string | null) => accounts.find(a => a.id === id)?.currency || base;
 
   const clearFilters = () => { setSearch(''); setFilterCategory(''); setFilterAccount(''); setFilterOwner(''); setFilterType('all'); };
+  // Apply a quick preset → fills the From/To range.
+  const applyDatePreset = (p: string) => {
+    setDatePreset(p);
+    const now = new Date();
+    const f = (d: Date) => format(d, 'yyyy-MM-dd');
+    if (p === 'This Month') { setFromDate(f(startOfMonth(now))); setToDate(f(endOfMonth(now))); }
+    else if (p === 'Last Month') { const d = subMonths(now, 1); setFromDate(f(startOfMonth(d))); setToDate(f(endOfMonth(d))); }
+    else if (p === 'Last 3 Months') { setFromDate(f(startOfMonth(subMonths(now, 2)))); setToDate(f(endOfMonth(now))); }
+    else if (p === 'This Year') { setFromDate(f(startOfYear(now))); setToDate(f(endOfYear(now))); }
+    else if (p === 'Last Year') { const d = subYears(now, 1); setFromDate(f(startOfYear(d))); setToDate(f(endOfYear(d))); }
+    else if (p === 'All Time') { setFromDate(''); setToDate(''); }
+    // 'Custom' keeps whatever From/To are currently set.
+  };
   const toggleSort = (key: 'date' | 'amount') => {
     if (sortKey === key) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
     else { setSortKey(key); setSortDir('desc'); }
@@ -121,11 +135,10 @@ export default function TransactionsPage() {
   }, [accounts, displayCur, rates, base]);
 
   const filtered = useMemo(() => {
-    const start = `${filterYear}-${String(filterMonth).padStart(2, '0')}-01`;
-    const end = format(endOfMonth(new Date(filterYear, filterMonth - 1)), 'yyyy-MM-dd');
     const q = search.trim().toLowerCase();
     const rows = transactions.filter(t => {
-      if (t.date < start || t.date > end) return false;
+      if (fromDate && t.date < fromDate) return false;
+      if (toDate && t.date > toDate) return false;
       if (filterType !== 'all' && t.type !== filterType) return false;
       if (filterCategory && t.category !== filterCategory) return false;
       if (filterAccount && t.from_account_id !== filterAccount && t.to_account_id !== filterAccount) return false;
@@ -141,7 +154,7 @@ export default function TransactionsPage() {
       return sortDir === 'asc' ? cmp : -cmp;
     });
     return rows;
-  }, [transactions, filterMonth, filterYear, filterType, filterCategory, filterAccount, filterOwner, search, sortKey, sortDir, convDisp]);
+  }, [transactions, fromDate, toDate, filterType, filterCategory, filterAccount, filterOwner, search, sortKey, sortDir, convDisp]);
 
   // Summary of the currently-filtered rows (all amounts converted to display
   // currency). Drives the count + per-type sums + filtered total.
@@ -344,12 +357,12 @@ export default function TransactionsPage() {
             placeholder="Search description, category, amount…"
             className="form-input text-sm py-1.5 px-3 flex-1 min-w-[180px]"
           />
-          <select className="form-select text-sm py-1.5 px-3 w-auto" value={filterMonth} onChange={e => setFilterMonth(+e.target.value)}>
-            {MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+          <select className="form-select text-sm py-1.5 px-3 w-auto" value={datePreset} onChange={e => applyDatePreset(e.target.value)} title="Quick date range">
+            {DATE_PRESETS.map(p => <option key={p} value={p}>{p}</option>)}
           </select>
-          <select className="form-select text-sm py-1.5 px-3 w-auto" value={filterYear} onChange={e => setFilterYear(+e.target.value)}>
-            {YEARS.map(y => <option key={y} value={y}>{y}</option>)}
-          </select>
+          <input type="date" className="form-input text-sm py-1.5 px-2 w-auto" value={fromDate} onChange={e => { setFromDate(e.target.value); setDatePreset('Custom'); }} title="From date" />
+          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>to</span>
+          <input type="date" className="form-input text-sm py-1.5 px-2 w-auto" value={toDate} onChange={e => { setToDate(e.target.value); setDatePreset('Custom'); }} title="To date" />
           <select className="form-select text-sm py-1.5 px-3 w-auto" value={filterType} onChange={e => setFilterType(e.target.value as any)}>
             <option value="all">All Types</option>
             {TRANSACTION_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
