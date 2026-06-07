@@ -4,7 +4,8 @@ import { format, endOfMonth } from 'date-fns';
 import { useAppStore } from '@/lib/store/appStore';
 import { createClient } from '@/lib/supabase/client';
 import { Income } from '@/types';
-import { formatCurrency, calculateAccountBalances, accountRole } from '@/lib/utils/calculations';
+import { formatCurrency, calculateAccountBalances, accountRole, currencySymbol, convertAmount } from '@/lib/utils/calculations';
+import { useDisplayCurrency } from '@/lib/useDisplayCurrency';
 import toast from 'react-hot-toast';
 import { Plus, Pencil, Trash2, X, Check } from 'lucide-react';
 
@@ -34,6 +35,14 @@ export default function IncomePage() {
   const sb = createClient();
   const sym = settings?.currency_symbol ?? '₹';
 
+  // Multi-currency: each income row is in its to-account's currency. Rows show
+  // that native currency; the Total/True Income figures are converted into the
+  // chosen display currency before summing.
+  const base = settings?.currency ?? 'INR';
+  const rates = settings?.exchange_rates;
+  const [displayCur] = useDisplayCurrency(base);
+  const curOf = (id?: string | null) => accounts.find(a => a.id === id)?.currency || base;
+
   const incomeCategories = useMemo(() => categories.filter(c => (c.type === 'income' || c.type === 'all') && c.is_active), [categories]);
   const activeAccounts = useMemo(() => accounts.filter(a => a.is_active && !a.is_credit_card), [accounts]);
   const activeOwners = useMemo(() => owners.filter(o => o.is_active), [owners]);
@@ -44,8 +53,17 @@ export default function IncomePage() {
     return income.filter(i => i.date >= start && i.date <= end).sort((a, b) => b.date.localeCompare(a.date));
   }, [income, filterMonth, filterYear]);
 
-  const totalIncome = useMemo(() => filtered.reduce((s, i) => s + i.amount, 0), [filtered]);
-  const trueIncome = useMemo(() => filtered.filter(i => i.include_in_true_income).reduce((s, i) => s + i.amount, 0), [filtered]);
+  // Income may land in accounts of different currencies, so convert each entry
+  // into the display currency before summing. With a single currency (and/or no
+  // rates) convertAmount returns the amount unchanged.
+  const totalIncome = useMemo(() => {
+    const curById = (id?: string | null) => accounts.find(a => a.id === id)?.currency || base;
+    return filtered.reduce((s, i) => s + convertAmount(i.amount, curById(i.to_account_id), displayCur, rates, base), 0);
+  }, [filtered, accounts, displayCur, rates, base]);
+  const trueIncome = useMemo(() => {
+    const curById = (id?: string | null) => accounts.find(a => a.id === id)?.currency || base;
+    return filtered.filter(i => i.include_in_true_income).reduce((s, i) => s + convertAmount(i.amount, curById(i.to_account_id), displayCur, rates, base), 0);
+  }, [filtered, accounts, displayCur, rates, base]);
 
   const openNew = () => {
     setEditing(null);
@@ -174,8 +192,9 @@ export default function IncomePage() {
           </select>
         </div>
         <div className="flex items-center gap-4 text-sm">
-          <span style={{ color: 'var(--text-muted)' }}>Total: <strong className="amount-positive">{formatCurrency(totalIncome, sym)}</strong></span>
-          <span style={{ color: 'var(--text-muted)' }}>True Income: <strong className="text-blue-600">{formatCurrency(trueIncome, sym)}</strong></span>
+          <span style={{ color: 'var(--text-muted)' }}>Total: <strong className="amount-positive">{formatCurrency(totalIncome, currencySymbol(displayCur))}</strong></span>
+          <span style={{ color: 'var(--text-muted)' }}>True Income: <strong className="text-blue-600">{formatCurrency(trueIncome, currencySymbol(displayCur))}</strong></span>
+          <span className="text-xs opacity-70" style={{ color: 'var(--text-muted)' }}>(in {displayCur})</span>
         </div>
       </div>
 
@@ -196,6 +215,12 @@ export default function IncomePage() {
                 <div className="form-group">
                   <label className="form-label">Amount *</label>
                   <input type="number" className="form-input" placeholder="0" value={form.amount || ''} onChange={e => setForm({ ...form, amount: +e.target.value })} min="0" step="0.01" />
+                  {(() => {
+                    // Display-only hint: the stored amount is in the selected
+                    // to-account's own currency.
+                    const cur = curOf(form.to_account_id);
+                    return <p className="form-hint mt-1">Amount is in {currencySymbol(cur)} {cur}</p>;
+                  })()}
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
@@ -268,7 +293,7 @@ export default function IncomePage() {
                 return (
                   <tr key={inc.id}>
                     <td className="text-xs whitespace-nowrap" style={{ color: 'var(--text-muted)' }}>{inc.date}</td>
-                    <td><span className="amount-positive font-semibold">{formatCurrency(inc.amount, sym)}</span></td>
+                    <td><span className="amount-positive font-semibold">{formatCurrency(inc.amount, currencySymbol(curOf(inc.to_account_id)))}</span></td>
                     <td><span className="badge badge-green text-[10px]">{inc.category}</span></td>
                     <td className="text-sm" style={{ color: 'var(--text-secondary)' }}>{inc.source || '—'}</td>
                     <td><span className="badge badge-blue text-[10px]">{inc.owner_purpose}</span></td>

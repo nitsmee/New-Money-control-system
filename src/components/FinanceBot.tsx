@@ -10,10 +10,11 @@ import {
 import { useAppStore } from '@/lib/store/appStore';
 import { createClient } from '@/lib/supabase/client';
 import {
-  calculateAccountBalances, calculateDashboardKPIs, formatCurrency, getMonthTotals,
+  calculateAccountBalances, calculateDashboardKPIs, calculateBudgetStatus,
+  formatCurrency, getMonthTotals, currencySymbol, accountRole, CURRENCY_SYMBOLS,
 } from '@/lib/utils/calculations';
 import type {
-  Account, Transaction, Income, Category, Goal, Budget,
+  Account, Transaction, Income, Category, Goal, Budget, FixedExpense,
   UserSettings, DashboardKPIs, DateFilter, AccountBalance,
 } from '@/types';
 
@@ -29,6 +30,31 @@ const eq = (a: string | null | undefined, b: string) => (a || '').toLowerCase() 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const fmt = (d: Date) => format(d, 'yyyy-MM-dd');
+
+// Light typo/synonym tolerance. Produces an alternate phrasing of the query
+// that maps common natural words onto the vocabulary the matchers already
+// understand. Used only as a SECOND attempt, so it never changes the meaning
+// of a query the existing handlers already answer correctly.
+const SYNONYMS: [RegExp, string][] = [
+  [/\bspendings?\b/g, 'expense'],
+  [/\bexpenditures?\b/g, 'expense'],
+  [/\boutgoings?\b/g, 'expense'],
+  [/\bearnings?\b/g, 'income'],
+  [/\bsalary\b/g, 'income'],
+  [/\bwages?\b/g, 'income'],
+  [/\bpaychecks?\b/g, 'income'],
+  [/\bset aside\b/g, 'saving'],
+  [/\bput aside\b/g, 'saving'],
+  [/\bsaved\b/g, 'saving'],
+  [/\bsavings\b/g, 'saving'],
+  [/\bhow much do i have\b/g, 'balance'],
+  [/\bhow much have i got\b/g, 'balance'],
+  [/\blatest\b/g, 'recent'],
+  [/\bmost recent\b/g, 'recent'],
+];
+function normalizeQuery(q: string): string {
+  return SYNONYMS.reduce((s, [re, to]) => s.replace(re, to), q);
+}
 
 // ============================================================
 // CONCEPTUAL KNOWLEDGE BASE ("how is X calculated")
@@ -295,6 +321,14 @@ function topCategory(expenses: Entry[]): { category: string; amount: number } | 
   map.forEach((v, k) => { if (v > max) { max = v; best = k; } });
   return best ? { category: best, amount: max } : null;
 }
+function topCategories(expenses: Entry[], n: number): { category: string; amount: number }[] {
+  const map = new Map<string, number>();
+  expenses.forEach(t => { const c = t.category || 'Uncategorised'; map.set(c, (map.get(c) || 0) + t.amount); });
+  return [...map.entries()]
+    .map(([category, amount]) => ({ category, amount }))
+    .sort((a, b) => b.amount - a.amount)
+    .slice(0, n);
+}
 
 // ============================================================
 // BOT DATA + REPLY TYPES
@@ -307,6 +341,7 @@ interface BotData {
   categories: Category[];
   goals: Goal[];
   budgets: Budget[];
+  fixedExpenses: FixedExpense[];
   settings: UserSettings | null;
   kpis: DashboardKPIs | null;
   balances: AccountBalance[];
@@ -352,16 +387,54 @@ function answerHelp(q: string): string | null {
   return null;
 }
 
+// Detect a currency *code* asked about (e.g. "how much in THB"). Matches a
+// known code that is actually used by one of the user's accounts, so a plain
+// word never gets mistaken for a currency. Returns the upper-cased code.
+function matchCurrencyCode(q: string, accounts: Account[]): string | null {
+  const used = new Set(accounts.map(a => (a.currency || '').toUpperCase()).filter(Boolean));
+  for (const code of used) {
+    if (CURRENCY_SYMBOLS[code] && new RegExp(`\\b${escapeRegex(code.toLowerCase())}\\b`).test(q)) return code;
+  }
+  return null;
+}
+
 function answerBalance(q: string, data: BotData, fc: (n: number) => string): string {
+  const baseCur = data.settings?.currency ?? 'INR';
   const acct = matchAccount(q, data.accounts);
   if (acct) {
     const b = data.balances.find(x => x.account.id === acct.id);
     if (!b) return `I couldn't find that account.`;
-    return b.is_credit_card ? `💳 ${acct.name} outstanding: ${fc(b.outstanding ?? 0)} (amount you owe).` : `💰 ${acct.name} balance: ${fc(b.balance)}.`;
+    // Show each account in its OWN currency (balances are stored per-account).
+    const afc = (n: number) => formatCurrency(n, currencySymbol(acct.currency || baseCur));
+    return b.is_credit_card ? `💳 ${acct.name} outstanding: ${afc(b.outstanding ?? 0)} (amount you owe).` : `💰 ${acct.name} balance: ${afc(b.balance)}.`;
   }
+
+  // "how much in THB" — a currency, not an account: sum same-currency accounts.
+  const code = matchCurrencyCode(q, data.accounts);
+  if (code) {
+    const inCur = data.balances.filter(b => b.account.is_active && (b.account.currency || baseCur).toUpperCase() === code);
+    const cfc = (n: number) => formatCurrency(n, currencySymbol(code));
+    if (!inCur.length) return `You have no active accounts in ${code}.`;
+    const lines = inCur.map(b => b.is_credit_card ? `• ${b.account.name}: ${cfc(b.outstanding ?? 0)} owed` : `• ${b.account.name}: ${cfc(b.balance)}`);
+    const liquid = inCur.filter(b => !b.is_credit_card).reduce((s, b) => s + b.balance, 0);
+    const owed = inCur.filter(b => b.is_credit_card).reduce((s, b) => s + (b.outstanding ?? 0), 0);
+    return `💰 Your ${code} accounts:\n${lines.join('\n')}\n\nTotal in ${code}: ${cfc(liquid)}${owed > 0 ? `\nOwed on ${code} cards: ${cfc(owed)}` : ''}`;
+  }
+
   const active = data.balances.filter(b => b.account.is_active);
   if (!active.length) return 'No active accounts found yet.';
-  const lines = active.map(b => b.is_credit_card ? `• ${b.account.name}: ${fc(b.outstanding ?? 0)} owed` : `• ${b.account.name}: ${fc(b.balance)}`);
+  // When accounts span multiple currencies, render each in its own currency
+  // and skip a (misleading) cross-currency total.
+  const currencies = new Set(active.map(b => (b.account.currency || baseCur).toUpperCase()));
+  const multi = currencies.size > 1;
+  const balFc = (b: AccountBalance) => formatCurrency(
+    b.is_credit_card ? (b.outstanding ?? 0) : b.balance,
+    currencySymbol(b.account.currency || baseCur),
+  );
+  const lines = active.map(b => b.is_credit_card ? `• ${b.account.name}: ${balFc(b)} owed` : `• ${b.account.name}: ${balFc(b)}`);
+  if (multi) {
+    return `💰 Account balances:\n${lines.join('\n')}\n\n(Accounts span ${currencies.size} currencies — ask "how much in ${[...currencies][0]}" for a per-currency total.)`;
+  }
   const liquid = active.filter(b => !b.is_credit_card).reduce((s, b) => s + b.balance, 0);
   const owed = active.filter(b => b.is_credit_card).reduce((s, b) => s + (b.outstanding ?? 0), 0);
   return `💰 Account balances:\n${lines.join('\n')}\n\nTotal cash/savings: ${fc(liquid)}${owed > 0 ? `\nTotal owed on cards: ${fc(owed)}` : ''}`;
@@ -373,6 +446,86 @@ function topCutTip(data: BotData, fc: (n: number) => string): string {
   const exp = data.transactions.filter(t => t.type === 'expense' && t.date >= start && t.date <= end) as unknown as Entry[];
   const tc = topCategory(exp);
   return tc ? `\n• Your biggest category this month is ${tc.category} (${fc(tc.amount)}) — trimming it speeds this up` : '';
+}
+
+// "where did my money go", "what did I spend the most on", "top spending".
+// Lists the top 3-5 expense categories for the period (date in query, else
+// this month).
+function answerTopSpending(q: string, data: BotData): string | null {
+  // Deliberately NOT matching "biggest expense" (singular) — that means the
+  // single largest transaction, handled by the existing 'top' data query.
+  const signal = /\b(where did (my|the) money go|where('?s| is| has) (my|the) money gone|what did i spend (the )?most on|what.*spend the most|spend the most on|top (spending|categor(y|ies))|biggest (spending|categor(y|ies))|spent the most|most spending)\b/.test(q);
+  if (!signal) return null;
+  const sym = data.settings?.currency_symbol ?? '₹';
+  const fc = (n: number) => formatCurrency(n, sym);
+  let range = parseDateRange(q);
+  const defaulted = !range;
+  if (!range) { const now = new Date(); range = { start: fmt(startOfMonth(now)), end: fmt(endOfMonth(now)), label: 'this month' }; }
+  const expenses = data.transactions.filter(t => t.type === 'expense' && t.date >= range!.start && t.date <= range!.end) as unknown as Entry[];
+  if (!expenses.length) return `No expenses recorded ${range.label}. 🎉`;
+  const top = topCategories(expenses, 5);
+  const total = sum(expenses);
+  const rows = top.map((c, i) => {
+    const pct = total > 0 ? Math.round((c.amount / total) * 100) : 0;
+    return `${i + 1}. ${c.category} — ${fc(c.amount)} (${pct}%)`;
+  });
+  const hint = defaulted ? '\n\n(Defaulted to this month — add a date like "last month" to change it.)' : '';
+  return `💸 Where your money went ${range.label} (total ${fc(total)}):\n${rows.join('\n')}${hint}`;
+}
+
+// "am I overspending", "how are my budgets". Summarises budget health for the
+// current month: how many over / on-track, and the worst category.
+function answerBudgetHealth(q: string, data: BotData): string | null {
+  const signal = /\b(am i overspending|over ?spending|how are my budgets?|how('?s| is) my budget|budget status|budget health|on (track|budget)|over budget|within budget|am i on budget)\b/.test(q);
+  if (!signal) return null;
+  const sym = data.settings?.currency_symbol ?? '₹';
+  const fc = (n: number) => formatCurrency(n, sym);
+  if (!data.budgets.length) return `You haven't set any budgets yet. Add one in **Budget** and I'll track your pace day-by-day.`;
+  const now = new Date();
+  const statuses = calculateBudgetStatus(data.budgets, data.transactions, data.fixedExpenses, now, now.getMonth() + 1, now.getFullYear());
+  const tracked = statuses.filter(s => s.status !== 'grey');
+  if (!tracked.length) return `You have budgets set, but none are active for this month yet.`;
+  const over = tracked.filter(s => s.status === 'red');
+  const near = tracked.filter(s => s.status === 'orange');
+  const onTrack = tracked.filter(s => s.status === 'green');
+  const lines: string[] = [];
+  if (!over.length && !near.length) {
+    lines.push(`✅ You're on track — all ${onTrack.length} budgeted categor${onTrack.length === 1 ? 'y is' : 'ies are'} within pace this month.`);
+  } else {
+    const verdict = over.length ? `⚠️ You're overspending in ${over.length} categor${over.length === 1 ? 'y' : 'ies'}.` : `🟡 ${near.length} categor${near.length === 1 ? 'y is' : 'ies are'} close to the limit.`;
+    lines.push(verdict);
+    lines.push(`• On track: ${onTrack.length} · Near limit: ${near.length} · Over: ${over.length}`);
+    const worst = [...tracked].sort((a, b) => b.overspent - a.overspent)[0];
+    if (worst && worst.overspent > 0) {
+      lines.push(`• Worst: ${worst.category} — ${fc(worst.actual_till_date)} spent vs ${fc(worst.allowed_till_date)} allowed so far (over by ${fc(worst.overspent)}).`);
+    }
+  }
+  return `📊 Budget check — this month:\n${lines.join('\n')}`;
+}
+
+// "net worth", "what am I worth". Cash + savings + investments − CC outstanding.
+function answerNetWorth(q: string, data: BotData): string | null {
+  if (!/\b(net ?worth|what am i worth|how much am i worth|total wealth)\b/.test(q)) return null;
+  const sym = data.settings?.currency_symbol ?? '₹';
+  const fc = (n: number) => formatCurrency(n, sym);
+  const k = data.kpis;
+  // Investments aren't in the KPI totals — sum investment-role accounts here.
+  const investTotal = data.balances
+    .filter(b => b.account.is_active && !b.is_credit_card && accountRole(b.account) === 'investment')
+    .reduce((s, b) => s + b.balance, 0);
+  const cash = k?.spendable_balance ?? 0;
+  const savings = k?.savings_balance ?? 0;
+  const cc = k?.total_cc_outstanding ?? 0;
+  const netWorth = cash + savings + investTotal - cc;
+  const lines = [
+    `💎 Your net worth: **${fc(netWorth)}**`,
+    '',
+    `• Cash (spendable): ${fc(cash)}`,
+    `• Savings: ${fc(savings)}`,
+    `• Investments: ${fc(investTotal)}`,
+    `• − Credit card owed: ${fc(cc)}`,
+  ];
+  return lines.join('\n');
 }
 
 function answerAffordability(q: string, data: BotData): string | null {
@@ -542,6 +695,10 @@ function liveValueFor(kb: KBEntry, data: BotData): string | null {
 // Top-level router. confident=false → caller may try the AI fallback.
 function localAnswer(rawQuery: string, data: BotData, me: UserInfo): { reply: BotReply; confident: boolean } {
   const q = rawQuery.toLowerCase().trim();
+  // A synonym-normalised alternate phrasing, tried as a SECOND chance so it
+  // never overrides a query the raw matchers already handle.
+  const qn = normalizeQuery(q);
+  const fcBase = (n: number) => formatCurrency(n, data.settings?.currency_symbol ?? '₹');
 
   const sec = securityRefusal(q); if (sec) return { reply: { text: sec }, confident: true };
   if (/^(hi|hii|hello|hey|yo|help|menu|what can you do|start)\b/.test(q)) return { reply: { text: CAPABILITIES }, confident: true };
@@ -553,22 +710,35 @@ function localAnswer(rawQuery: string, data: BotData, me: UserInfo): { reply: Bo
   const explainSignal = /\b(how is|how are|how does|how do|explain|formula|calculated|definition|what does .* mean|why is|why does)\b/.test(q);
   if (explainSignal) { const kb = findKB(q); if (kb) return { reply: { value: liveValueFor(kb, data) ?? undefined, entry: kb }, confident: true }; }
 
+  // Smarter, naturally-phrased intents (try raw, then normalised).
+  const worth = answerNetWorth(q, data) ?? answerNetWorth(qn, data); if (worth) return { reply: { text: worth }, confident: true };
+  const budgetHealth = answerBudgetHealth(q, data) ?? answerBudgetHealth(qn, data); if (budgetHealth) return { reply: { text: budgetHealth }, confident: true };
+  const topSpend = answerTopSpending(q, data) ?? answerTopSpending(qn, data); if (topSpend) return { reply: { text: topSpend }, confident: true };
+
   const hasDate = parseDateRange(q) !== null;
   const intent = classifyIntent(q);
 
   const count = answerEntityCount(q, data, hasDate); if (count) return { reply: { text: count }, confident: true };
-  if (intent === 'balance') return { reply: { text: answerBalance(q, data, n => formatCurrency(n, data.settings?.currency_symbol ?? '₹')) }, confident: true };
+  // Detect the balance intent on either phrasing, but answer from the RAW
+  // query so account names (which may contain synonym words) match cleanly.
+  if (intent === 'balance' || classifyIntent(qn) === 'balance') return { reply: { text: answerBalance(q, data, fcBase) }, confident: true };
   if (hasDate) return { reply: { text: answerDataQuery(q, data) }, confident: true };
 
   // "last 10 transactions" / "recent expenses" → N most recent, all-time
-  const recent = answerRecentList(q, data); if (recent) return { reply: { text: recent }, confident: true };
+  const recent = answerRecentList(q, data) ?? answerRecentList(qn, data); if (recent) return { reply: { text: recent }, confident: true };
 
   const kb = findKB(q); if (kb) return { reply: { value: liveValueFor(kb, data) ?? undefined, entry: kb }, confident: true };
 
   const dataSignals = intent !== 'unknown' || /\b(transaction|transactions|expense|expenses|income|saving|savings|spent|earned|paid)\b/.test(q);
   if (dataSignals) return { reply: { text: answerDataQuery(q, data) }, confident: true };
 
-  // Nothing matched locally → let the optional AI fallback try.
+  // Second chance: the normalised phrasing may expose data signals the raw
+  // query hid (e.g. "my spendings" → "expense", "earnings" → "income").
+  const dataSignalsN = classifyIntent(qn) !== 'unknown' || /\b(transaction|transactions|expense|expenses|income|saving|savings|spent|earned|paid)\b/.test(qn);
+  if (dataSignalsN) return { reply: { text: answerDataQuery(qn, data) }, confident: true };
+
+  // Nothing matched locally → still show the helpful capabilities text, and
+  // confident=false so the optional AI fallback (if configured) can try.
   return { reply: { text: CAPABILITIES }, confident: false };
 }
 
@@ -748,8 +918,8 @@ export function FinanceBot() {
   }, [accounts, income, transactions, fixedExpenses, settings]);
 
   const data: BotData = useMemo(
-    () => ({ accounts, transactions, income, categories, goals, budgets, settings, kpis, balances }),
-    [accounts, transactions, income, categories, goals, budgets, settings, kpis, balances]
+    () => ({ accounts, transactions, income, categories, goals, budgets, fixedExpenses, settings, kpis, balances }),
+    [accounts, transactions, income, categories, goals, budgets, fixedExpenses, settings, kpis, balances]
   );
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, open]);

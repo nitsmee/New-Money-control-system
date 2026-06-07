@@ -3,7 +3,8 @@ import { useState, useMemo } from 'react';
 import { useAppStore } from '@/lib/store/appStore';
 import { createClient } from '@/lib/supabase/client';
 import { Goal } from '@/types';
-import { calculateAccountBalances, analyzeGoal, formatCurrency } from '@/lib/utils/calculations';
+import { calculateAccountBalances, analyzeGoal, formatCurrency, currencySymbol, convertAmount } from '@/lib/utils/calculations';
+import { useDisplayCurrency } from '@/lib/useDisplayCurrency';
 import toast from 'react-hot-toast';
 import { Plus, Pencil, Trash2, X, Check, Target, CheckCircle, AlertTriangle, Clock, TrendingUp, Flag } from 'lucide-react';
 import { RadialBarChart, RadialBar, ResponsiveContainer } from 'recharts';
@@ -21,11 +22,50 @@ export default function GoalsPage() {
   const [form, setForm] = useState<typeof EMPTY>({...EMPTY});
   const [saving, setSaving] = useState(false);
   const sb = createClient();
-  const sym = settings?.currency_symbol ?? '₹';
 
+  // ---- Multi-currency wiring ----
+  // Goal amounts (expected_cost, amount_allocated, monthly_saving_plan) are
+  // stored in the BASE currency. The savings pool sums savings-account balances
+  // which may each be in a different native currency. We convert every figure
+  // into the chosen display currency before summing/comparing, so the pool,
+  // gaps and progress are all consistent. When display === base (or rates are
+  // missing) convertAmount is a no-op and output is unchanged.
+  const base = settings?.currency ?? 'INR';
+  const rates = settings?.exchange_rates;
+  const [displayCur] = useDisplayCurrency(base);
+  const sym = currencySymbol(displayCur);
+
+  // RAW balances — kept so each account's native currency is known for conversion.
   const balances = useMemo(() => calculateAccountBalances(accounts, income, transactions), [accounts, income, transactions]);
-  const totalSavings = useMemo(() => balances.filter(b => !b.is_credit_card && b.account.is_active && b.account.include_in_goal_savings).reduce((s,b) => s+b.balance, 0), [balances]);
-  const activeGoals = useMemo(() => goals.filter(g => g.is_active).sort((a,b) => a.priority - b.priority), [goals]);
+  // Each contributing account balance converted from its native currency to display.
+  const savingsBalances = useMemo(
+    () => balances
+      .filter(b => !b.is_credit_card && b.account.is_active && b.account.include_in_goal_savings)
+      .map(b => ({ account: b.account, displayBalance: convertAmount(b.balance, b.account.currency || base, displayCur, rates, base) })),
+    [balances, base, displayCur, rates]
+  );
+  const totalSavings = useMemo(() => savingsBalances.reduce((s,b) => s+b.displayBalance, 0), [savingsBalances]);
+  // Same pool expressed in the BASE currency — used by the form (whose inputs
+  // are base-currency values). Identical to totalSavings when display === base.
+  const totalSavingsBase = useMemo(
+    () => balances
+      .filter(b => !b.is_credit_card && b.account.is_active && b.account.include_in_goal_savings)
+      .reduce((s,b) => s + convertAmount(b.balance, b.account.currency || base, base, rates, base), 0),
+    [balances, base, rates]
+  );
+  // Goal monetary fields converted base -> display so analyzeGoal compares like with like.
+  const activeGoals = useMemo(
+    () => goals
+      .filter(g => g.is_active)
+      .sort((a,b) => a.priority - b.priority)
+      .map(g => ({
+        ...g,
+        expected_cost: convertAmount(g.expected_cost, base, displayCur, rates, base),
+        amount_allocated: convertAmount(g.amount_allocated, base, displayCur, rates, base),
+        monthly_saving_plan: convertAmount(g.monthly_saving_plan, base, displayCur, rates, base),
+      })),
+    [goals, base, displayCur, rates]
+  );
   const goalAnalyses = useMemo(() => {
     // Allocate savings pool sequentially by priority so goals don't all
     // compete against the same full pool — buying goal #1 leaves less for #2.
@@ -45,8 +85,12 @@ export default function GoalsPage() {
 
   const openNew = () => { setEditing(null); setForm({...EMPTY}); setShowForm(true); };
   const openEdit = (g: Goal) => {
-    setEditing(g);
-    setForm({ name:g.name, goal_type:g.goal_type??'', priority:g.priority, expected_cost:g.expected_cost, planned_purchase_date:g.planned_purchase_date??undefined, amount_allocated:g.amount_allocated, monthly_saving_plan:g.monthly_saving_plan, payment_plan:g.payment_plan??'', is_active:g.is_active, notes:g.notes??'' });
+    // Card goals are converted to the display currency for presentation, so look
+    // up the original (base-currency) goal from the store and edit THAT — the
+    // form and the saved payload must always be in the base currency.
+    const orig = goals.find(x => x.id === g.id) ?? g;
+    setEditing(orig);
+    setForm({ name:orig.name, goal_type:orig.goal_type??'', priority:orig.priority, expected_cost:orig.expected_cost, planned_purchase_date:orig.planned_purchase_date??undefined, amount_allocated:orig.amount_allocated, monthly_saving_plan:orig.monthly_saving_plan, payment_plan:orig.payment_plan??'', is_active:orig.is_active, notes:orig.notes??'' });
     setShowForm(true);
   };
 
@@ -109,10 +153,10 @@ export default function GoalsPage() {
             <p className="text-xs mt-1" style={{ color:'var(--text-muted)' }}>From accounts marked "Include in Goal Savings"</p>
           </div>
           <div className="text-sm space-y-1">
-            {balances.filter(b => !b.is_credit_card && b.account.is_active && b.account.include_in_goal_savings).map(b => (
+            {savingsBalances.map(b => (
               <div key={b.account.id} className="flex justify-between gap-6">
                 <span style={{ color:'var(--text-secondary)' }}>{b.account.name}</span>
-                <span className="font-semibold text-blue-700 dark:text-blue-300">{formatCurrency(b.balance, sym)}</span>
+                <span className="font-semibold text-blue-700 dark:text-blue-300">{formatCurrency(b.displayBalance, sym)}</span>
               </div>
             ))}
             {balances.filter(b => b.account.include_in_goal_savings).length === 0 && (
@@ -225,8 +269,8 @@ export default function GoalsPage() {
                 <div className="form-group">
                   <label className="form-label">Monthly Saving Plan</label>
                   <input type="number" className="form-input" placeholder="0" value={form.monthly_saving_plan||''} onChange={e => setForm({...form, monthly_saving_plan:+e.target.value})} min="0" />
-                  {form.monthly_saving_plan > 0 && form.expected_cost > totalSavings && (
-                    <p className="form-hint">~{Math.ceil((form.expected_cost - totalSavings) / form.monthly_saving_plan)} months to go</p>
+                  {form.monthly_saving_plan > 0 && form.expected_cost > totalSavingsBase && (
+                    <p className="form-hint">~{Math.ceil((form.expected_cost - totalSavingsBase) / form.monthly_saving_plan)} months to go</p>
                   )}
                 </div>
                 <div className="form-group">

@@ -1,7 +1,8 @@
 'use client';
 import { useMemo, useState, useEffect } from 'react';
 import { useAppStore } from '@/lib/store/appStore';
-import { calculateAccountBalances, calculateBudgetStatus, calculateDashboardKPIs, generateAlerts, formatCurrency, safeDueDate } from '@/lib/utils/calculations';
+import { calculateAccountBalances, calculateBudgetStatus, calculateDashboardKPIs, generateAlerts, formatCurrency, safeDueDate, currencySymbol, convertAmount, normalizeAmounts } from '@/lib/utils/calculations';
+import { useDisplayCurrency } from '@/lib/useDisplayCurrency';
 import { AlertTriangle, CheckCircle, Info, XCircle, Bell, TrendingDown, CreditCard, Calendar, Shield, X } from 'lucide-react';
 import Link from 'next/link';
 
@@ -23,14 +24,37 @@ const SNOOZE_MS = 86400000; // 24h
 
 export default function AlertsPage() {
   const { accounts, income, transactions, budgets, fixedExpenses, settings } = useAppStore();
-  const sym = settings?.currency_symbol ?? '₹';
   const today = new Date();
 
-  const balances = useMemo(() => calculateAccountBalances(accounts, income, transactions), [accounts, income, transactions]);
-  const budgetStatuses = useMemo(() => calculateBudgetStatus(budgets, transactions, fixedExpenses, today, today.getMonth()+1, today.getFullYear()), [budgets, transactions, fixedExpenses]);
-  const alerts = useMemo(() => generateAlerts(budgetStatuses, balances, fixedExpenses, settings ?? { safe_spend_buffer:5000 } as any), [budgetStatuses, balances, fixedExpenses, settings]);
+  // ---- Multi-currency wiring ----
+  // All alert thresholds, KPIs and messages are computed from amounts
+  // normalized into the chosen display currency, so the figures here match the
+  // dashboard. Fixed-expense amounts (in their own native account currency) are
+  // converted too. When display === base (or rates are missing) every
+  // conversion is a no-op and the output is identical to before.
+  const base = settings?.currency ?? 'INR';
+  const rates = settings?.exchange_rates;
+  const [displayCur] = useDisplayCurrency(base);
+  const sym = currencySymbol(displayCur);
+  const norm = useMemo(
+    () => normalizeAmounts(accounts, income, transactions, rates, base, displayCur),
+    [accounts, income, transactions, rates, base, displayCur]
+  );
+  // Fixed-expense amounts converted from their from-account's native currency to display.
+  const displayFixedExpenses = useMemo(() => {
+    const curOf = new Map(accounts.map(a => [a.id, a.currency || base]));
+    return fixedExpenses.map(fe => ({
+      ...fe,
+      amount: convertAmount(fe.amount, (fe.from_account_id && curOf.get(fe.from_account_id)) || base, displayCur, rates, base),
+    }));
+  }, [fixedExpenses, accounts, base, displayCur, rates]);
+
+  // NORMALIZED balances/statuses/KPIs — every figure in the display currency.
+  const balances = useMemo(() => calculateAccountBalances(norm.accounts, norm.income, norm.transactions), [norm]);
+  const budgetStatuses = useMemo(() => calculateBudgetStatus(budgets, norm.transactions, displayFixedExpenses, today, today.getMonth()+1, today.getFullYear()), [budgets, norm.transactions, displayFixedExpenses]);
+  const alerts = useMemo(() => generateAlerts(budgetStatuses, balances, displayFixedExpenses, settings ?? { safe_spend_buffer:5000 } as any, sym), [budgetStatuses, balances, displayFixedExpenses, settings, sym]);
   // Same engine the dashboard uses — guarantees the Safe-to-Spend number here matches it.
-  const kpis = useMemo(() => calculateDashboardKPIs(accounts, income, transactions, fixedExpenses, { view: 'monthly', month: today.getMonth()+1, year: today.getFullYear() }, settings ?? { safe_spend_buffer:5000 } as any), [accounts, income, transactions, fixedExpenses, settings]);
+  const kpis = useMemo(() => calculateDashboardKPIs(norm.accounts, norm.income, norm.transactions, displayFixedExpenses, { view: 'monthly', month: today.getMonth()+1, year: today.getFullYear() }, settings ?? { safe_spend_buffer:5000 } as any), [norm, displayFixedExpenses, settings]);
 
   // Additional computed alerts
   const extraAlerts = useMemo(() => {
@@ -61,7 +85,7 @@ export default function AlertsPage() {
     // posted this month). Clamp the due day to the real month length so
     // month-end bills (29–31) aren't mis-dated.
     const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
-    fixedExpenses.filter(fe => fe.is_active && fe.auto_count && fe.last_processed_period !== thisMonth).forEach(fe => {
+    displayFixedExpenses.filter(fe => fe.is_active && fe.auto_count && fe.last_processed_period !== thisMonth).forEach(fe => {
       const occStr = safeDueDate(fe.due_day, today.getFullYear(), today.getMonth());
       if (occStr <= todayStr) {
         extra.push({ id:`unprocessed-${fe.id}`, type:'unprocessed_fixed', title:`Unprocessed Auto-Payment: ${fe.name}`, message:`"${fe.name}" (${formatCurrency(fe.amount, sym)}) was due on the ${fe.due_day}th but hasn't been auto-processed yet.`, severity:'warning' as const, actionable:true, action_label:'Fixed Expenses', action_link:'/dashboard/fixed-expenses' });
@@ -69,7 +93,7 @@ export default function AlertsPage() {
     });
 
     return extra;
-  }, [balances, transactions, fixedExpenses, settings, sym, today, kpis]);
+  }, [balances, transactions, displayFixedExpenses, settings, sym, today, kpis]);
 
   const allAlerts = [...alerts, ...extraAlerts];
 

@@ -62,6 +62,7 @@ export interface Account {
   user_id: string;
   name: string;
   account_type: string;
+  currency?: string;        // per-account currency (defaults to the base currency)
   owner_purpose?: string;
   is_active: boolean;
   include_in_dashboard: boolean;
@@ -241,6 +242,7 @@ export interface UserSettings {
   month_start_day: number;
   safe_spend_buffer: number;
   sweep_enabled: boolean;
+  exchange_rates?: Record<string, number>; // value of 1 unit of each currency in the base currency
   dashboard_view: DashboardView;
   selected_month: number;
   selected_year: number;

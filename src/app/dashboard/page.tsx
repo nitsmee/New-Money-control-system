@@ -3,8 +3,10 @@ import { useMemo, useState, useEffect, useRef } from 'react';
 import { useAppStore } from '@/lib/store/appStore';
 import {
   calculateAccountBalances, calculateDashboardKPIs, calculateBudgetStatus,
-  buildMonthlyTrends, getCategorySpend, generateAlerts, formatCurrency, formatDate, accountRole, safeDueDate
+  buildMonthlyTrends, getCategorySpend, generateAlerts, formatCurrency, formatDate, accountRole, safeDueDate,
+  currencySymbol, normalizeAmounts
 } from '@/lib/utils/calculations';
+import { useDisplayCurrency } from '@/lib/useDisplayCurrency';
 import { runAutoProcess } from '@/lib/utils/autoProcess';
 import { runAutoProcessIncome } from '@/lib/utils/autoProcessIncome';
 import { createClient } from '@/lib/supabase/client';
@@ -64,6 +66,12 @@ interface DetailData {
 let dashboardAutoRan = false;
 let incomeAutoRan = false;
 
+// Honors each account's "Show on Dashboard" toggle (Phase 4) — anything not
+// explicitly turned off still appears. Module-scoped so it's a stable reference
+// (no hook dependency churn) and shared by every balance bucket below.
+const shown = (b: { account: { is_active: boolean; include_in_dashboard?: boolean } }) =>
+  b.account.is_active && b.account.include_in_dashboard !== false;
+
 export default function DashboardPage() {
   const { accounts, income, transactions, fixedExpenses, budgets, goals, categories, settings, dateFilter, setDateFilter, isLoading, recurringIncome } = useAppStore();
 
@@ -73,29 +81,70 @@ export default function DashboardPage() {
   const [detail, setDetail] = useState<DetailData | null>(null);
   const filter = { ...dateFilter, month: selMonth, year: selYear };
   const period = `${selYear}-${String(selMonth).padStart(2, '0')}`;
-  const sym = settings?.currency_symbol ?? '₹';
 
+  // ---- Multi-currency wiring ----
+  // Base currency is the user's setting; the display currency is a UI-only,
+  // persisted choice that defaults to base. All AGGREGATE figures are computed
+  // from amounts normalized into the display currency; per-account balances and
+  // recent-transaction amounts stay in their own native currency.
+  const base = settings?.currency ?? 'INR';
+  const rates = settings?.exchange_rates;
+  const [displayCur, setDisplayCur] = useDisplayCurrency(base);
+  const sym = currencySymbol(displayCur);
+
+  // Build the normalized copies once and reuse across every aggregate calc.
+  // When displayCur === base (and/or no rates exist) convertAmount returns the
+  // amount unchanged, so totals are identical to the single-currency behaviour.
+  const norm = useMemo(
+    () => normalizeAmounts(accounts, income, transactions, rates, base, displayCur),
+    [accounts, income, transactions, rates, base, displayCur]
+  );
+
+  // Distinct currencies in use = base + every account currency (deduped).
+  const currenciesInUse = useMemo(() => {
+    const set = new Set<string>([base]);
+    accounts.forEach(a => { if (a.currency) set.add(a.currency); });
+    return Array.from(set);
+  }, [accounts, base]);
+
+  // account id -> native currency, for showing raw amounts in their own currency.
+  const acctCurrency = useMemo(() => {
+    const m = new Map<string, string>();
+    accounts.forEach(a => m.set(a.id, a.currency || base));
+    return m;
+  }, [accounts, base]);
+  // A transaction's native currency = its from-account's (or to-account's)
+  // currency — mirrors how normalizeAmounts picks the source currency.
+  const txSymbol = (tx: { from_account_id?: string | null; to_account_id?: string | null }) =>
+    currencySymbol(acctCurrency.get(tx.from_account_id ?? tx.to_account_id ?? '') || base);
+
+  // RAW balances — each account in its own native currency (Account Balances list).
   const balances = useMemo(() => calculateAccountBalances(accounts, income, transactions), [accounts, income, transactions]);
-  const kpis = useMemo(() => settings ? calculateDashboardKPIs(accounts, income, transactions, fixedExpenses, filter, settings) : null, [accounts, income, transactions, fixedExpenses, filter, settings]);
-  const budgetStatus = useMemo(() => calculateBudgetStatus(budgets, transactions, fixedExpenses, now, selMonth, selYear), [budgets, transactions, fixedExpenses, selMonth, selYear]);
-  const trends = useMemo(() => buildMonthlyTrends(income, transactions, 12), [income, transactions]);
+  // NORMALIZED balances — every figure in the display currency (KPI totals, alerts).
+  const normBalances = useMemo(() => calculateAccountBalances(norm.accounts, norm.income, norm.transactions), [norm]);
+  const kpis = useMemo(() => settings ? calculateDashboardKPIs(norm.accounts, norm.income, norm.transactions, fixedExpenses, filter, settings) : null, [norm, fixedExpenses, filter, settings]);
+  const budgetStatus = useMemo(() => calculateBudgetStatus(budgets, norm.transactions, fixedExpenses, now, selMonth, selYear), [budgets, norm.transactions, fixedExpenses, selMonth, selYear]);
+  const trends = useMemo(() => buildMonthlyTrends(norm.income, norm.transactions, 12), [norm.income, norm.transactions]);
   const catSpend = useMemo(() => getCategorySpend(
-    transactions.filter(t => t.date.startsWith(period)),
+    norm.transactions.filter(t => t.date.startsWith(period)),
     categories.map(c => ({ name: c.name, color: c.color }))
-  ), [transactions, period, categories]);
-  const activeAlerts = useMemo(() => generateAlerts(budgetStatus, balances, fixedExpenses, settings ?? { safe_spend_buffer: 5000 } as any), [budgetStatus, balances, fixedExpenses, settings]);
+  ), [norm.transactions, period, categories]);
+  const activeAlerts = useMemo(() => generateAlerts(budgetStatus, normBalances, fixedExpenses, settings ?? { safe_spend_buffer: 5000 } as any, sym), [budgetStatus, normBalances, fixedExpenses, settings, sym]);
 
-  const balOf = (id?: string) => balances.find(b => b.account.id === id);
+  const balOf = (id?: string) => normBalances.find(b => b.account.id === id);
 
-  // Derived figures. `shown` honors each account's "Show on Dashboard" toggle
-  // (Phase 4) — anything not explicitly turned off still appears.
-  const shown = (b: typeof balances[number]) => b.account.is_active && b.account.include_in_dashboard !== false;
+  // Derived figures.
+  // RAW (native-currency) balances — used only by the Account Balances list and
+  // the salary-account picker, both of which are currency-agnostic / native.
   const bankBalances = useMemo(() => balances.filter(b => !b.is_credit_card && b.account.is_active), [balances]);
   const ccBalances = useMemo(() => balances.filter(b => b.is_credit_card && shown(b)), [balances]);
-  const cashBalances = useMemo(() => balances.filter(b => shown(b) && accountRole(b.account) === 'cash'), [balances]);
-  const savingsBalances = useMemo(() => balances.filter(b => shown(b) && accountRole(b.account) === 'savings'), [balances]);
-  const investBalances = useMemo(() => balances.filter(b => shown(b) && accountRole(b.account) === 'investment'), [balances]);
-  const familyBalances = useMemo(() => balances.filter(b => shown(b) && accountRole(b.account) === 'family'), [balances]);
+  // NORMALIZED (display-currency) role buckets — power the KPI totals and the
+  // breakdown lists inside each card's detail modal, so sums match the headline.
+  const ccBalancesNorm = useMemo(() => normBalances.filter(b => b.is_credit_card && shown(b)), [normBalances]);
+  const cashBalances = useMemo(() => normBalances.filter(b => shown(b) && accountRole(b.account) === 'cash'), [normBalances]);
+  const savingsBalances = useMemo(() => normBalances.filter(b => shown(b) && accountRole(b.account) === 'savings'), [normBalances]);
+  const investBalances = useMemo(() => normBalances.filter(b => shown(b) && accountRole(b.account) === 'investment'), [normBalances]);
+  const familyBalances = useMemo(() => normBalances.filter(b => shown(b) && accountRole(b.account) === 'family'), [normBalances]);
   const investTotal = useMemo(() => investBalances.reduce((s, b) => s + b.balance, 0), [investBalances]);
   const familyTotal = useMemo(() => familyBalances.reduce((s, b) => s + b.balance, 0), [familyBalances]);
   const netWorth = (kpis?.spendable_balance ?? 0) + (kpis?.savings_balance ?? 0) + investTotal - (kpis?.total_cc_outstanding ?? 0);
@@ -123,7 +172,9 @@ export default function DashboardPage() {
   // Split this month's "saving" transactions into true savings vs investments
   // (a saving whose destination is an investment account is an investment).
   const investAcctIds = useMemo(() => new Set(investBalances.map(b => b.account.id)), [investBalances]);
-  const investedPeriod = useMemo(() => transactions.filter(t => t.type === 'saving' && t.date.startsWith(period) && t.to_account_id && investAcctIds.has(t.to_account_id)).reduce((s, t) => s + t.amount, 0), [transactions, period, investAcctIds]);
+  // Use normalized transactions so this nets cleanly against kpis.total_savings
+  // (also normalized) when building the savings-vs-invested split.
+  const investedPeriod = useMemo(() => norm.transactions.filter(t => t.type === 'saving' && t.date.startsWith(period) && t.to_account_id && investAcctIds.has(t.to_account_id)).reduce((s, t) => s + t.amount, 0), [norm.transactions, period, investAcctIds]);
   const savedPeriod = (kpis?.total_savings ?? 0) - investedPeriod;
 
   // For Safe-to-Spend, reserve only bank/cash-paid bills — card-charged ones
@@ -135,8 +186,9 @@ export default function DashboardPage() {
   // Honest safe-to-spend (can be negative): spendable − bank-paid bills − card debt − buffer.
   const trueSafe = Math.round(spendable - bankPaidUpcoming - ccOutstanding - buffer);
 
-  // Salary detection & monthly limit
-  const salaryThisMonth = useMemo(() => income.filter(i => (i.category || '').toLowerCase().includes('salary') && i.date.startsWith(period)).reduce((s, i) => s + i.amount, 0), [income, period]);
+  // Salary detection & monthly limit. Normalized so the bar compares like-for-like
+  // against spentThisMonth (kpis.total_expense, also in the display currency).
+  const salaryThisMonth = useMemo(() => norm.income.filter(i => (i.category || '').toLowerCase().includes('salary') && i.date.startsWith(period)).reduce((s, i) => s + i.amount, 0), [norm.income, period]);
   const spentThisMonth = kpis?.total_expense ?? 0;
   const salaryLeft = salaryThisMonth - spentThisMonth;
   const salaryPct = salaryThisMonth > 0 ? Math.min(100, Math.max(0, (spentThisMonth / salaryThisMonth) * 100)) : 0;
@@ -151,7 +203,8 @@ export default function DashboardPage() {
     return [...bankBalances].sort((x, y) => y.balance - x.balance)[0]?.account;
   }, [income, accounts, bankBalances]);
   const salaryAccBal = Math.round(balOf(salaryAccount?.id)?.balance ?? 0);
-  const sweepThisMonth = useMemo(() => transactions.find(t => t.type === 'saving' && (t.description || '').toLowerCase().startsWith('auto: leftover') && t.date.startsWith(period)), [transactions, period]);
+  // From normalized transactions so the swept amount displays in the chosen currency.
+  const sweepThisMonth = useMemo(() => norm.transactions.find(t => t.type === 'saving' && (t.description || '').toLowerCase().startsWith('auto: leftover') && t.date.startsWith(period)), [norm.transactions, period]);
 
   // Auto-post any due fixed expenses on load (unchanged behaviour).
   useEffect(() => {
@@ -258,7 +311,7 @@ export default function DashboardPage() {
         title: 'Credit card outstanding', value: kpis?.total_cc_outstanding ?? 0, tone: 'neg',
         blurb: 'Total you currently owe across all credit cards.',
         listTitle: 'Cards',
-        list: ccBalances.map(b => ({ label: b.account.name, amount: b.outstanding ?? 0 })),
+        list: ccBalancesNorm.map(b => ({ label: b.account.name, amount: b.outstanding ?? 0 })),
       },
     },
     {
@@ -340,6 +393,17 @@ export default function DashboardPage() {
           <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Financial overview — {MONTHS[selMonth - 1]} {selYear}</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          {currenciesInUse.length > 1 && (
+            <select
+              className="form-select text-sm py-2 px-3 pr-8 w-auto"
+              value={displayCur}
+              onChange={e => setDisplayCur(e.target.value)}
+              title="Display all totals in this currency"
+              aria-label="Display currency"
+            >
+              {currenciesInUse.map(c => <option key={c} value={c}>{currencySymbol(c)} {c}</option>)}
+            </select>
+          )}
           <select className="form-select text-sm py-2 px-3 pr-8 w-auto" value={selMonth} onChange={e => { setSelMonth(+e.target.value); setDateFilter({ ...filter, month: +e.target.value }); }}>
             {MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
           </select>
@@ -502,7 +566,10 @@ export default function DashboardPage() {
         <div className="card card-p animate-fade-in-up">
           <h3 className="section-title text-base mb-4">Account Balances</h3>
           <div className="space-y-3">
-            {[...bankBalances.filter(b => b.account.include_in_dashboard), ...ccBalances.filter(b => (b.outstanding ?? 0) > 0)].map(b => (
+            {[...bankBalances.filter(b => b.account.include_in_dashboard), ...ccBalances.filter(b => (b.outstanding ?? 0) > 0)].map(b => {
+              // Each account is shown in ITS OWN native currency (never converted).
+              const aSym = currencySymbol(b.account.currency || base);
+              return (
               <div key={b.account.id} className="flex items-center gap-3 py-1">
                 <div className="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-700 flex items-center justify-center flex-shrink-0">
                   {b.is_credit_card ? <CreditCard size={15} className="text-red-500" /> : <Wallet size={15} className="text-blue-500" />}
@@ -512,10 +579,11 @@ export default function DashboardPage() {
                   <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{b.account.account_type}</p>
                 </div>
                 <span className={`text-sm font-bold ${b.is_credit_card ? 'amount-negative' : b.balance >= 0 ? 'amount-positive' : 'amount-negative'}`}>
-                  {b.is_credit_card ? `-${formatCurrency(b.outstanding ?? 0, sym)}` : formatCurrency(b.balance, sym)}
+                  {b.is_credit_card ? `-${formatCurrency(b.outstanding ?? 0, aSym)}` : formatCurrency(b.balance, aSym)}
                 </span>
               </div>
-            ))}
+              );
+            })}
           </div>
           {ccBalances.some(b => (b.outstanding ?? 0) === 0) && (
             <p className="text-xs mt-3" style={{ color: 'var(--text-muted)' }}>{ccBalances.filter(b => (b.outstanding ?? 0) === 0).length} card(s) at ₹0 hidden.</p>
@@ -560,7 +628,7 @@ export default function DashboardPage() {
                   <td className="max-w-xs"><span className="truncate block" style={{ maxWidth: 200 }}>{tx.description || tx.category || tx.type}</span></td>
                   <td><span className="badge badge-gray text-[10px]">{tx.category ?? '—'}</span></td>
                   <td><span className={`badge text-[10px] ${tx.type === 'expense' ? 'badge-red' : tx.type === 'saving' ? 'badge-blue' : tx.type === 'credit_card_payment' ? 'badge-yellow' : 'badge-gray'}`}>{tx.type.replace(/_/g, ' ')}</span></td>
-                  <td className={`text-right font-semibold text-sm ${tx.type === 'expense' ? 'amount-negative' : tx.type === 'saving' ? 'text-blue-600' : 'amount-positive'}`}>{tx.type === 'expense' ? '-' : ''}{formatCurrency(tx.amount, sym)}</td>
+                  <td className={`text-right font-semibold text-sm ${tx.type === 'expense' ? 'amount-negative' : tx.type === 'saving' ? 'text-blue-600' : 'amount-positive'}`}>{tx.type === 'expense' ? '-' : ''}{formatCurrency(tx.amount, txSymbol(tx))}</td>
                 </tr>
               ))}
               {transactions.length === 0 && <tr><td colSpan={5} className="text-center py-8 text-sm" style={{ color: 'var(--text-muted)' }}>No transactions yet. <Link href="/dashboard/transactions" className="text-blue-600 hover:underline">Add one →</Link></td></tr>}

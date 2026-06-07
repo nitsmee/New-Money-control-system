@@ -4,10 +4,13 @@ import { useAppStore } from '@/lib/store/appStore';
 import { createClient } from '@/lib/supabase/client';
 import { Account, Category, Owner, UserSettings } from '@/types';
 import toast from 'react-hot-toast';
-import { Plus, Pencil, Trash2, X, Check, Settings, Database, User, Tag, Wallet, Download, Upload } from 'lucide-react';
+import { Plus, Pencil, Trash2, X, Check, Settings, Database, User, Tag, Wallet, Download, Upload, RefreshCw, Coins } from 'lucide-react';
 import Papa from 'papaparse';
+import { currencySymbol } from '@/lib/utils/calculations';
 
 type Tab = 'accounts'|'categories'|'owners'|'preferences';
+
+const SUPPORTED_CURRENCIES = ['INR','THB','USD','EUR','GBP','JPY','AED','SGD','AUD','CAD','MYR','CNY'];
 
 export default function SettingsPage() {
   const { accounts, categories, owners, settings, addAccount, updateAccount, removeAccount, addCategory, updateCategory, removeCategory, addOwner, updateOwner, removeOwner, updateSettings, transactions, income, budgets, goals, fixedExpenses, recurringIncome } = useAppStore();
@@ -18,10 +21,11 @@ export default function SettingsPage() {
   // ---- ACCOUNTS ----
   const [showAccForm, setShowAccForm] = useState(false);
   const [editingAcc, setEditingAcc] = useState<Account|null>(null);
-  const [accForm, setAccForm] = useState({ name:'', account_type:'Bank Account', owner_purpose:'', is_active:true, include_in_dashboard:true, include_in_goal_savings:false, is_credit_card:false, is_spendable:true, notes:'' });
+  const baseCurrency = settings?.currency ?? 'INR';
+  const [accForm, setAccForm] = useState({ name:'', account_type:'Bank Account', currency: baseCurrency, owner_purpose:'', is_active:true, include_in_dashboard:true, include_in_goal_savings:false, is_credit_card:false, is_spendable:true, notes:'' });
 
-  const openNewAcc = () => { setEditingAcc(null); setAccForm({ name:'', account_type:'Bank Account', owner_purpose:'', is_active:true, include_in_dashboard:true, include_in_goal_savings:false, is_credit_card:false, is_spendable:true, notes:'' }); setShowAccForm(true); };
-  const openEditAcc = (a: Account) => { setEditingAcc(a); setAccForm({ name:a.name, account_type:a.account_type, owner_purpose:a.owner_purpose??'', is_active:a.is_active, include_in_dashboard:a.include_in_dashboard, include_in_goal_savings:a.include_in_goal_savings, is_credit_card:a.is_credit_card, is_spendable:a.is_spendable, notes:a.notes??'' }); setShowAccForm(true); };
+  const openNewAcc = () => { setEditingAcc(null); setAccForm({ name:'', account_type:'Bank Account', currency: baseCurrency, owner_purpose:'', is_active:true, include_in_dashboard:true, include_in_goal_savings:false, is_credit_card:false, is_spendable:true, notes:'' }); setShowAccForm(true); };
+  const openEditAcc = (a: Account) => { setEditingAcc(a); setAccForm({ name:a.name, account_type:a.account_type, currency: a.currency ?? baseCurrency, owner_purpose:a.owner_purpose??'', is_active:a.is_active, include_in_dashboard:a.include_in_dashboard, include_in_goal_savings:a.include_in_goal_savings, is_credit_card:a.is_credit_card, is_spendable:a.is_spendable, notes:a.notes??'' }); setShowAccForm(true); };
 
   const hasTransactions = (accId: string) =>
     transactions.some(t => t.from_account_id===accId || t.to_account_id===accId) ||
@@ -188,6 +192,81 @@ export default function SettingsPage() {
     } catch (e:any) { toast.error(e.message); } finally { setSavingPrefs(false); }
   };
 
+  // ---- CURRENCIES & EXCHANGE RATES ----
+  // rates[ccy] = value of 1 unit of ccy IN the base currency (base itself = 1).
+  const [rateForm, setRateForm] = useState<Record<string, number>>(settings?.exchange_rates ?? {});
+  const [ratesUpdatedAt, setRatesUpdatedAt] = useState<string|null>(null);
+  const [fetchingRates, setFetchingRates] = useState(false);
+  const [savingRates, setSavingRates] = useState(false);
+  const [addCcy, setAddCcy] = useState('');
+
+  // Keep the editable rate table in sync if settings load/refresh from the store.
+  useEffect(() => { setRateForm(settings?.exchange_rates ?? {}); }, [settings?.exchange_rates]);
+
+  // Currencies actually in use: base + every distinct account currency +
+  // every key already present in the saved exchange rates.
+  const currenciesInUse = useMemo(() => {
+    const set = new Set<string>([baseCurrency]);
+    accounts.forEach(a => { if (a.currency) set.add(a.currency); });
+    Object.keys(rateForm).forEach(c => set.add(c));
+    return Array.from(set);
+  }, [accounts, rateForm, baseCurrency]);
+
+  // Non-base currencies needing a rate row, plus any the user explicitly added.
+  const rateRowCurrencies = useMemo(
+    () => currenciesInUse.filter(c => c !== baseCurrency).sort(),
+    [currenciesInUse, baseCurrency]
+  );
+
+  // Currencies from the supported list that aren't already shown — offered in
+  // the "Add" dropdown so the user can seed a rate before any account uses it.
+  const addableCurrencies = SUPPORTED_CURRENCIES.filter(
+    c => c !== baseCurrency && !rateRowCurrencies.includes(c)
+  );
+
+  const persistRates = async (merged: Record<string, number>) => {
+    updateSettings({ exchange_rates: merged });
+    const { data: { user } } = await sb.auth.getUser();
+    if (!user) return;
+    const { error } = await sb.from('user_settings').update({ exchange_rates: merged }).eq('user_id', user.id);
+    if (error) throw error;
+  };
+
+  const fetchRatesAuto = async () => {
+    setFetchingRates(true);
+    try {
+      const res = await fetch(`/api/fx?base=${encodeURIComponent(baseCurrency)}`);
+      const json: { ok: boolean; rates?: Record<string, number>; updated?: string|null; error?: string } = await res.json();
+      if (!json.ok || !json.rates) { toast.error(json.error ? `Rate update failed: ${json.error}` : 'Rate update failed'); return; }
+      const merged: Record<string, number> = { ...rateForm, ...json.rates, [baseCurrency]: 1 };
+      setRateForm(merged);
+      await persistRates(merged);
+      const stamp = json.updated ?? new Date().toISOString();
+      setRatesUpdatedAt(stamp);
+      toast.success('Exchange rates updated');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Rate update failed');
+    } finally { setFetchingRates(false); }
+  };
+
+  const saveRates = async () => {
+    setSavingRates(true);
+    try {
+      const merged: Record<string, number> = { ...rateForm, [baseCurrency]: 1 };
+      await persistRates(merged);
+      setRatesUpdatedAt(new Date().toISOString());
+      toast.success('Exchange rates saved');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not save rates');
+    } finally { setSavingRates(false); }
+  };
+
+  const addCurrencyRow = () => {
+    if (!addCcy) return;
+    setRateForm(prev => ({ ...prev, [addCcy]: prev[addCcy] ?? 0 }));
+    setAddCcy('');
+  };
+
   // ---- EXPORT / IMPORT ----
   const exportAllData = () => {
     const data = { accounts, categories, owners, income, transactions };
@@ -235,12 +314,13 @@ export default function SettingsPage() {
           <div className="card">
             <div className="table-container border-0">
               <table className="data-table">
-                <thead><tr><th>Name</th><th>Type</th><th>Dashboard</th><th>Goal Savings</th><th>CC</th><th>Spendable</th><th>Status</th><th className="text-right">Actions</th></tr></thead>
+                <thead><tr><th>Name</th><th>Type</th><th>Currency</th><th>Dashboard</th><th>Goal Savings</th><th>CC</th><th>Spendable</th><th>Status</th><th className="text-right">Actions</th></tr></thead>
                 <tbody>
                   {accounts.map(a => (
                     <tr key={a.id}>
                       <td className="font-medium text-sm">{a.name}</td>
                       <td className="text-xs">{a.account_type}</td>
+                      <td className="text-xs">{a.currency ?? baseCurrency}</td>
                       <td>{a.include_in_dashboard?<span className="badge badge-green text-[10px]">Yes</span>:<span className="badge badge-gray text-[10px]">No</span>}</td>
                       <td>{a.include_in_goal_savings?<span className="badge badge-blue text-[10px]">Yes</span>:<span className="badge badge-gray text-[10px]">No</span>}</td>
                       <td>{a.is_credit_card?<span className="badge badge-red text-[10px]">Yes</span>:<span className="badge badge-gray text-[10px]">No</span>}</td>
@@ -275,6 +355,13 @@ export default function SettingsPage() {
                     <select className="form-select" value={accForm.account_type} onChange={e => setAccForm({...accForm, account_type:e.target.value, is_credit_card:e.target.value==='Credit Card', is_spendable:e.target.value!=='Investment / Long-Term Account'&&e.target.value!=='Savings Bucket' })}>
                       {ACC_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
                     </select>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Currency</label>
+                    <select className="form-select" value={accForm.currency} onChange={e => setAccForm({...accForm, currency:e.target.value})}>
+                      {SUPPORTED_CURRENCIES.map(c => <option key={c} value={c}>{c} — {currencySymbol(c)}</option>)}
+                    </select>
+                    <p className="form-hint">Balances in this account are held in this currency.</p>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     {[
@@ -519,6 +606,64 @@ export default function SettingsPage() {
                 <p className="font-medium text-blue-800 dark:text-blue-300 mb-1">Data Safety</p>
                 <p style={{ color:'var(--text-secondary)' }}>All data is synced to your private Supabase database. Deactivating accounts or categories never deletes historical data — old transactions remain intact.</p>
               </div>
+            </div>
+          </div>
+
+          {/* CURRENCIES & EXCHANGE RATES */}
+          <div className="card card-p space-y-4 lg:col-span-2">
+            <div className="flex items-center gap-2">
+              <Coins size={18} className="text-blue-600 dark:text-blue-400"/>
+              <h3 className="section-title text-base">Currencies &amp; Exchange Rates</h3>
+            </div>
+            <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-lg text-sm">
+              <p><span className="font-medium">Base:</span> {baseCurrency} {currencySymbol(baseCurrency)} — everything converts to/from this.</p>
+              <p className="form-hint mt-1">Each rate below is the value of 1 unit of that currency in {baseCurrency}.</p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <button onClick={fetchRatesAuto} disabled={fetchingRates} className="btn-md btn-secondary gap-2">
+                {fetchingRates ? <span className="w-4 h-4 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin"/> : <RefreshCw size={16}/>}
+                {fetchingRates ? 'Updating…' : 'Update rates automatically (free)'}
+              </button>
+              {ratesUpdatedAt && (
+                <span className="text-xs" style={{ color:'var(--text-muted)' }}>Last updated: {new Date(ratesUpdatedAt).toLocaleString()}</span>
+              )}
+            </div>
+
+            {rateRowCurrencies.length === 0 ? (
+              <p className="text-sm" style={{ color:'var(--text-muted)' }}>No other currencies in use yet. Add one below or set a per-account currency.</p>
+            ) : (
+              <div className="table-container border-0">
+                <table className="data-table">
+                  <thead><tr><th>Currency</th><th>Rate</th></tr></thead>
+                  <tbody>
+                    {rateRowCurrencies.map(ccy => (
+                      <tr key={ccy}>
+                        <td className="font-medium text-sm whitespace-nowrap">{ccy} {currencySymbol(ccy)}</td>
+                        <td>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs whitespace-nowrap" style={{ color:'var(--text-muted)' }}>1 {ccy} =</span>
+                            <input type="number" min="0" step="any" className="form-input w-32" value={rateForm[ccy] ?? 0} onChange={e => setRateForm(prev => ({ ...prev, [ccy]: +e.target.value }))}/>
+                            <span className="text-xs whitespace-nowrap" style={{ color:'var(--text-muted)' }}>{baseCurrency}</span>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-slate-100 dark:border-slate-700">
+              <select className="form-select w-auto" value={addCcy} onChange={e => setAddCcy(e.target.value)} disabled={addableCurrencies.length === 0}>
+                <option value="">{addableCurrencies.length === 0 ? 'All currencies added' : '— Add a currency —'}</option>
+                {addableCurrencies.map(c => <option key={c} value={c}>{c} — {currencySymbol(c)}</option>)}
+              </select>
+              <button onClick={addCurrencyRow} disabled={!addCcy} className="btn-md btn-secondary gap-2"><Plus size={16}/> Add</button>
+              <button onClick={saveRates} disabled={savingRates} className="btn-md btn-primary gap-2 ml-auto">
+                {savingRates ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/> : <Check size={16}/>}
+                {savingRates ? 'Saving…' : 'Save rates'}
+              </button>
             </div>
           </div>
         </div>

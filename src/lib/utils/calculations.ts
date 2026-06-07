@@ -509,7 +509,8 @@ export function generateAlerts(
   budgetStatuses: BudgetStatus[],
   balances: AccountBalance[],
   fixedExpenses: FixedExpense[],
-  settings: UserSettings
+  settings: UserSettings,
+  sym: string = '₹'
 ): Alert[] {
   const alerts: Alert[] = [];
   const today = new Date();
@@ -521,7 +522,7 @@ export function generateAlerts(
         id: `budget-exceeded-${bs.category}`,
         type: 'budget_exceeded',
         title: `Budget Exceeded: ${bs.category}`,
-        message: `You've spent ₹${bs.actual_till_date.toLocaleString('en-IN')} of ₹${bs.monthly_budget.toLocaleString('en-IN')} budget (₹${(bs.actual_till_date - bs.monthly_budget).toLocaleString('en-IN')} over).`,
+        message: `You've spent ${sym}${bs.actual_till_date.toLocaleString('en-IN')} of ${sym}${bs.monthly_budget.toLocaleString('en-IN')} budget (${sym}${(bs.actual_till_date - bs.monthly_budget).toLocaleString('en-IN')} over).`,
         severity: 'error',
         actionable: false,
       });
@@ -530,7 +531,7 @@ export function generateAlerts(
         id: `budget-ahead-${bs.category}`,
         type: 'budget_overspent',
         title: `Spending Ahead: ${bs.category}`,
-        message: `Spent ₹${bs.actual_till_date.toLocaleString('en-IN')} vs ₹${bs.allowed_till_date.toFixed(0)} allowed till today. Recovery needed: ₹${bs.recovery_per_day.toFixed(0)}/day.`,
+        message: `Spent ${sym}${bs.actual_till_date.toLocaleString('en-IN')} vs ${sym}${bs.allowed_till_date.toFixed(0)} allowed till today. Recovery needed: ${sym}${bs.recovery_per_day.toFixed(0)}/day.`,
         severity: 'warning',
         actionable: false,
       });
@@ -544,7 +545,7 @@ export function generateAlerts(
         id: `negative-${b.account.id}`,
         type: 'negative_balance',
         title: `Negative Balance: ${b.account.name}`,
-        message: `Account "${b.account.name}" has a negative balance of ₹${Math.abs(b.balance).toLocaleString('en-IN')}.`,
+        message: `Account "${b.account.name}" has a negative balance of ${sym}${Math.abs(b.balance).toLocaleString('en-IN')}.`,
         severity: 'error',
         actionable: false,
       });
@@ -558,7 +559,7 @@ export function generateAlerts(
         id: `cc-high-${b.account.id}`,
         type: 'high_cc_outstanding',
         title: `High Credit Card Balance: ${b.account.name}`,
-        message: `Outstanding of ₹${b.outstanding?.toLocaleString('en-IN')} on ${b.account.name}.`,
+        message: `Outstanding of ${sym}${b.outstanding?.toLocaleString('en-IN')} on ${b.account.name}.`,
         severity: 'warning',
         actionable: false,
       });
@@ -586,7 +587,7 @@ export function generateAlerts(
         id: `fixed-due-${fe.id}`,
         type: 'fixed_expense_due',
         title: `Fixed Payment Due: ${fe.name}`,
-        message: `₹${fe.amount.toLocaleString('en-IN')} due ${daysUntil === 0 ? 'today' : `in ${daysUntil} day${daysUntil === 1 ? '' : 's'}`}.`,
+        message: `${sym}${fe.amount.toLocaleString('en-IN')} due ${daysUntil === 0 ? 'today' : `in ${daysUntil} day${daysUntil === 1 ? '' : 's'}`}.`,
         severity: daysUntil === 0 ? 'error' : 'warning',
         actionable: false,
       });
@@ -700,6 +701,63 @@ export function formatDate(dateStr: string, fmt = 'dd-MMM-yyyy'): string {
 
 export function cn(...classes: (string | undefined | null | false)[]): string {
   return classes.filter(Boolean).join(' ');
+}
+
+// ============================================================
+// MULTI-CURRENCY
+// ============================================================
+
+export const CURRENCY_SYMBOLS: Record<string, string> = {
+  INR: '₹', THB: '฿', USD: '$', EUR: '€', GBP: '£', JPY: '¥',
+  AED: 'د.إ', SGD: 'S$', AUD: 'A$', CAD: 'C$', MYR: 'RM', CNY: '¥',
+  CHF: 'CHF', HKD: 'HK$', NZD: 'NZ$', LKR: 'Rs', NPR: 'रू',
+};
+
+export function currencySymbol(code?: string): string {
+  if (!code) return '₹';
+  return CURRENCY_SYMBOLS[code.toUpperCase()] ?? `${code.toUpperCase()} `;
+}
+
+// rates: value of 1 unit of a currency expressed IN the base currency.
+// The base currency itself is implicitly 1.
+export function convertAmount(
+  amount: number,
+  from: string,
+  to: string,
+  rates: Record<string, number> | undefined,
+  base: string
+): number {
+  if (!from || !to || from === to) return amount;
+  const r = rates ?? {};
+  const rf = from === base ? 1 : r[from];
+  const rt = to === base ? 1 : r[to];
+  if (!rf || !rt) return amount; // unknown rate → best-effort, leave as-is
+  return (amount * rf) / rt;
+}
+
+// Returns copies of accounts/income/transactions with every amount converted
+// into `display` currency, so the existing single-currency calculation
+// functions can be reused unchanged for cross-currency aggregate totals.
+// A row's source currency is its account's currency (from-account for
+// transactions, to-account for income).
+export function normalizeAmounts(
+  accounts: Account[],
+  income: Income[],
+  transactions: Transaction[],
+  rates: Record<string, number> | undefined,
+  base: string,
+  display: string
+): { accounts: Account[]; income: Income[]; transactions: Transaction[] } {
+  const curOf = new Map(accounts.map(a => [a.id, a.currency || base]));
+  const cur = (id?: string | null) => (id && curOf.get(id)) || base;
+  return {
+    accounts: accounts.map(a => ({ ...a, currency: display })),
+    income: income.map(i => ({ ...i, amount: convertAmount(i.amount, cur(i.to_account_id), display, rates, base) })),
+    transactions: transactions.map(t => ({
+      ...t,
+      amount: convertAmount(t.amount, cur(t.from_account_id ?? t.to_account_id), display, rates, base),
+    })),
+  };
 }
 
 // ============================================================

@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/client';
 import { useAppStore } from '@/lib/store/appStore';
 import {
@@ -36,6 +37,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const { sidebarOpen, setSidebarOpen, theme, setTheme, loadAll, settings } = useAppStore();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [user, setUser] = useState<{ email?: string; name?: string } | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const initialized = useRef(false);
 
@@ -45,6 +47,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       const { data: { user: u } } = await sb.auth.getUser();
       if (!u) { router.push('/auth/login'); return; }
       setUser({ email: u.email, name: u.user_metadata?.full_name });
+      setUserId(u.id);
       if (!initialized.current) {
         initialized.current = true;
         await loadAll(u.id);
@@ -52,6 +55,58 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     };
     init();
   }, []);
+
+  // Live multi-tab / multi-device sync via Supabase Realtime. When this user's
+  // rows change anywhere (another tab or device), reload the store so the
+  // current view stays fresh without a manual refresh. Fails silently if
+  // Realtime isn't enabled on the tables yet — no live updates, but no crash.
+  useEffect(() => {
+    if (!userId) return;
+
+    let channel: RealtimeChannel | null = null;
+    let reloadTimer: ReturnType<typeof setTimeout> | null = null;
+
+    // Debounce reloads so a burst of changes (or the user's own writes)
+    // coalesces into a single refetch instead of a reload storm.
+    const scheduleReload = () => {
+      if (reloadTimer) clearTimeout(reloadTimer);
+      reloadTimer = setTimeout(() => {
+        useAppStore.getState().loadAll(userId);
+      }, 1500);
+    };
+
+    try {
+      const sb = createClient();
+      const tables = [
+        'accounts', 'categories', 'owners', 'income', 'transactions',
+        'fixed_expenses', 'budget', 'goals', 'recurring_income', 'user_settings',
+      ] as const;
+
+      channel = sb.channel('mcs-realtime');
+      for (const table of tables) {
+        channel.on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table, filter: `user_id=eq.${userId}` },
+          () => scheduleReload()
+        );
+      }
+      channel.subscribe();
+    } catch (e) {
+      // A Realtime setup failure must never break the dashboard.
+      console.error('Realtime subscription failed:', e);
+    }
+
+    return () => {
+      if (reloadTimer) clearTimeout(reloadTimer);
+      if (channel) {
+        try {
+          createClient().removeChannel(channel);
+        } catch (e) {
+          console.error('Realtime cleanup failed:', e);
+        }
+      }
+    };
+  }, [userId]);
 
   // Onboarding check
   useEffect(() => {

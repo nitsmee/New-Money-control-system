@@ -3,7 +3,8 @@ import { useState, useMemo } from 'react';
 import { useAppStore } from '@/lib/store/appStore';
 import { createClient } from '@/lib/supabase/client';
 import { Budget } from '@/types';
-import { calculateBudgetStatus, formatCurrency } from '@/lib/utils/calculations';
+import { calculateBudgetStatus, formatCurrency, currencySymbol, convertAmount, normalizeAmounts } from '@/lib/utils/calculations';
+import { useDisplayCurrency } from '@/lib/useDisplayCurrency';
 import { getDaysInMonth } from 'date-fns';
 import toast from 'react-hot-toast';
 import { Plus, Pencil, Trash2, X, Check, TrendingUp, AlertTriangle, CheckCircle } from 'lucide-react';
@@ -12,7 +13,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 export default function BudgetPage() {
-  const { budgets, categories, owners, transactions, fixedExpenses, addBudget, updateBudget, removeBudget, settings } = useAppStore();
+  const { budgets, categories, owners, accounts, transactions, fixedExpenses, addBudget, updateBudget, removeBudget, settings } = useAppStore();
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Budget | null>(null);
   const [form, setForm] = useState({ category: '', owner_purpose: '', monthly_budget: 0, include_in_budget: true, notes: '' });
@@ -20,8 +21,36 @@ export default function BudgetPage() {
   const [selMonth, setSelMonth] = useState(new Date().getMonth() + 1);
   const [selYear, setSelYear] = useState(new Date().getFullYear());
   const sb = createClient();
-  const sym = settings?.currency_symbol ?? '₹';
   const today = new Date();
+
+  // ---- Multi-currency wiring ----
+  // Budgets and fixed expenses are stored in the BASE currency / their native
+  // account currency. To display and compare everything in the chosen display
+  // currency we convert budgets (base -> display), convert fixed-expense
+  // amounts (their from-account's native currency -> display) and feed
+  // display-normalized transactions into calculateBudgetStatus — so every
+  // derived figure comes back already in the display currency. When
+  // display === base (or rates are missing) all conversions are no-ops.
+  const base = settings?.currency ?? 'INR';
+  const rates = settings?.exchange_rates;
+  const [displayCur] = useDisplayCurrency(base);
+  const sym = currencySymbol(displayCur);
+
+  const norm = useMemo(
+    () => normalizeAmounts(accounts, [], transactions, rates, base, displayCur),
+    [accounts, transactions, rates, base, displayCur]
+  );
+  const displayBudgets = useMemo(
+    () => budgets.map(b => ({ ...b, monthly_budget: convertAmount(b.monthly_budget, base, displayCur, rates, base) })),
+    [budgets, base, displayCur, rates]
+  );
+  const displayFixedExpenses = useMemo(() => {
+    const curOf = new Map(accounts.map(a => [a.id, a.currency || base]));
+    return fixedExpenses.map(fe => ({
+      ...fe,
+      amount: convertAmount(fe.amount, (fe.from_account_id && curOf.get(fe.from_account_id)) || base, displayCur, rates, base),
+    }));
+  }, [fixedExpenses, accounts, base, displayCur, rates]);
 
   const expenseCategories = useMemo(() => categories.filter(c => (c.type === 'expense' || c.type === 'all') && c.is_active && c.include_in_budget), [categories]);
   const activeOwners = useMemo(() => owners.filter(o => o.is_active), [owners]);
@@ -33,8 +62,8 @@ export default function BudgetPage() {
   }, [selMonth, selYear, today]);
 
   const budgetStatuses = useMemo(() =>
-    calculateBudgetStatus(budgets, transactions, fixedExpenses, statusDate, selMonth, selYear),
-    [budgets, transactions, fixedExpenses, statusDate, selMonth, selYear]
+    calculateBudgetStatus(displayBudgets, norm.transactions, displayFixedExpenses, statusDate, selMonth, selYear),
+    [displayBudgets, norm.transactions, displayFixedExpenses, statusDate, selMonth, selYear]
   );
 
   const summary = useMemo(() => ({
@@ -262,7 +291,7 @@ export default function BudgetPage() {
                 <label className="form-label">Monthly Budget Amount *</label>
                 <input type="number" className="form-input" placeholder="0" value={form.monthly_budget || ''} onChange={e => setForm({...form, monthly_budget: +e.target.value})} min="0" step="1" />
                 {form.monthly_budget > 0 && (
-                  <p className="form-hint">Daily budget: {formatCurrency(form.monthly_budget / getDaysInMonth(new Date(selYear, selMonth - 1)), sym)}/day</p>
+                  <p className="form-hint">Daily budget: {formatCurrency(form.monthly_budget / getDaysInMonth(new Date(selYear, selMonth - 1)), currencySymbol(base))}/day</p>
                 )}
               </div>
               <div className="form-group">

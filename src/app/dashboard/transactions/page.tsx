@@ -3,7 +3,8 @@ import { useState, useMemo } from 'react';
 import { useAppStore } from '@/lib/store/appStore';
 import { createClient } from '@/lib/supabase/client';
 import { Transaction, TransactionType, TRANSACTION_TYPES } from '@/types';
-import { formatCurrency } from '@/lib/utils/calculations';
+import { formatCurrency, currencySymbol, convertAmount } from '@/lib/utils/calculations';
+import { useDisplayCurrency } from '@/lib/useDisplayCurrency';
 import { format, endOfMonth } from 'date-fns';
 import toast from 'react-hot-toast';
 import { Plus, Pencil, Trash2, X, Check, Upload } from 'lucide-react';
@@ -78,6 +79,14 @@ export default function TransactionsPage() {
   const sb = createClient();
   const sym = settings?.currency_symbol ?? '₹';
 
+  // Multi-currency: each account holds amounts in its own currency. Row amounts
+  // are shown in that native currency; period totals (which may mix currencies)
+  // are converted into the chosen display currency before summing.
+  const base = settings?.currency ?? 'INR';
+  const rates = settings?.exchange_rates;
+  const [displayCur] = useDisplayCurrency(base);
+  const curOf = (id?: string | null) => accounts.find(a => a.id === id)?.currency || base;
+
   const cfg = getTypeConfig(form.type);
   const activeAccounts = useMemo(() => accounts.filter(a => a.is_active), [accounts]);
   const ccAccounts = useMemo(() => accounts.filter(a => a.is_active && a.is_credit_card), [accounts]);
@@ -93,11 +102,20 @@ export default function TransactionsPage() {
       .sort((a, b) => b.date.localeCompare(a.date));
   }, [transactions, filterMonth, filterYear, filterType]);
 
-  const totals = useMemo(() => ({
-    expense: filtered.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0),
-    saving: filtered.filter(t => t.type === 'saving').reduce((s, t) => s + t.amount, 0),
-    cc_payment: filtered.filter(t => t.type === 'credit_card_payment').reduce((s, t) => s + t.amount, 0),
-  }), [filtered]);
+  // Totals sum across possibly-mixed account currencies, so each transaction is
+  // converted into the display currency first. When everything is one currency
+  // (and/or no rates) convertAmount returns the amount unchanged.
+  const totals = useMemo(() => {
+    const curById = (id?: string | null) => accounts.find(a => a.id === id)?.currency || base;
+    const sumIn = (type: TransactionType) => filtered
+      .filter(t => t.type === type)
+      .reduce((s, t) => s + convertAmount(t.amount, curById(t.from_account_id ?? t.to_account_id), displayCur, rates, base), 0);
+    return {
+      expense: sumIn('expense'),
+      saving: sumIn('saving'),
+      cc_payment: sumIn('credit_card_payment'),
+    };
+  }, [filtered, accounts, displayCur, rates, base]);
 
   const allVisibleSelected = filtered.length > 0 && filtered.every(t => selectedIds.has(t.id));
 
@@ -286,9 +304,10 @@ export default function TransactionsPage() {
           </select>
         </div>
         <div className="flex items-center gap-4 text-xs" style={{ color: 'var(--text-muted)' }}>
-          <span>Expense: <strong className="amount-negative">{formatCurrency(totals.expense, sym)}</strong></span>
-          <span>Savings: <strong className="text-blue-600">{formatCurrency(totals.saving, sym)}</strong></span>
-          <span>CC Paid: <strong className="text-amber-600">{formatCurrency(totals.cc_payment, sym)}</strong></span>
+          <span>Expense: <strong className="amount-negative">{formatCurrency(totals.expense, currencySymbol(displayCur))}</strong></span>
+          <span>Savings: <strong className="text-blue-600">{formatCurrency(totals.saving, currencySymbol(displayCur))}</strong></span>
+          <span>CC Paid: <strong className="text-amber-600">{formatCurrency(totals.cc_payment, currencySymbol(displayCur))}</strong></span>
+          <span className="opacity-70">(in {displayCur})</span>
         </div>
       </div>
 
@@ -354,6 +373,14 @@ export default function TransactionsPage() {
                 <div className="form-group">
                   <label className="form-label">Amount *</label>
                   <input type="number" className="form-input" placeholder="0.00" value={form.amount || ''} onChange={e => setForm({ ...form, amount: +e.target.value })} min="0.01" step="0.01" />
+                  {(() => {
+                    // Display-only hint: the stored amount is always in the
+                    // selected account's own currency (from-account if present,
+                    // otherwise the to-account).
+                    const acctId = form.from_account_id || form.to_account_id;
+                    const cur = curOf(acctId);
+                    return <p className="form-hint mt-1">Amount is in {currencySymbol(cur)} {cur}</p>;
+                  })()}
                 </div>
               </div>
 
@@ -494,7 +521,7 @@ export default function TransactionsPage() {
                     <td className="text-xs" style={{ color: 'var(--text-secondary)' }}>{fromAcc?.name ?? '—'}</td>
                     <td className="text-xs" style={{ color: 'var(--text-secondary)' }}>{toAcc?.name ?? '—'}</td>
                     <td className={`text-right font-semibold text-sm ${tx.type === 'expense' ? 'amount-negative' : tx.type === 'saving' ? 'text-blue-600 dark:text-blue-400' : 'amount-neutral'}`}>
-                      {tx.type === 'expense' ? '-' : ''}{formatCurrency(tx.amount, sym)}
+                      {tx.type === 'expense' ? '-' : ''}{formatCurrency(tx.amount, currencySymbol(curOf(tx.from_account_id ?? tx.to_account_id)))}
                     </td>
                     <td>
                       <div className="flex items-center justify-end gap-1">

@@ -1,7 +1,8 @@
 'use client';
 import { useState, useMemo } from 'react';
 import { useAppStore } from '@/lib/store/appStore';
-import { calculateAccountBalances, calculateBudgetStatus, getCategorySpend, formatCurrency, accountRole } from '@/lib/utils/calculations';
+import { calculateAccountBalances, calculateBudgetStatus, getCategorySpend, formatCurrency, accountRole, currencySymbol, normalizeAmounts } from '@/lib/utils/calculations';
+import { useDisplayCurrency } from '@/lib/useDisplayCurrency';
 import { format, endOfMonth } from 'date-fns';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, LineChart, Line, PieChart, Pie, Cell, ResponsiveContainer, AreaChart, Area } from 'recharts';
 import { Download, Calendar, TrendingUp, TrendingDown, Wallet } from 'lucide-react';
@@ -18,20 +19,32 @@ export default function ReportsPage() {
   const [selYear, setSelYear] = useState(new Date().getFullYear());
   const [startDate, setStartDate] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0]);
   const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
-  const sym = settings?.currency_symbol ?? '₹';
+
+  // ---- Multi-currency wiring ----
+  // All aggregate figures (totals, P&L, charts, category breakdowns, CSV
+  // numbers) are computed from amounts normalized into the display currency.
+  // The "Closing Balances" cards stay in each account's native currency.
+  const base = settings?.currency ?? 'INR';
+  const rates = settings?.exchange_rates;
+  const [displayCur] = useDisplayCurrency(base);
+  const sym = currencySymbol(displayCur);
+  const norm = useMemo(
+    () => normalizeAmounts(accounts, income, transactions, rates, base, displayCur),
+    [accounts, income, transactions, rates, base, displayCur]
+  );
 
   // --- Monthly Data ---
   const monthlyIncome = useMemo(() => {
     const s = `${selYear}-${String(selMonth).padStart(2,'0')}-01`;
     const e = format(endOfMonth(new Date(selYear, selMonth - 1)), 'yyyy-MM-dd');
-    return income.filter(i => i.date >= s && i.date <= e);
-  }, [income, selMonth, selYear]);
+    return norm.income.filter(i => i.date >= s && i.date <= e);
+  }, [norm.income, selMonth, selYear]);
 
   const monthlyTx = useMemo(() => {
     const s = `${selYear}-${String(selMonth).padStart(2,'0')}-01`;
     const e = format(endOfMonth(new Date(selYear, selMonth - 1)), 'yyyy-MM-dd');
-    return transactions.filter(t => t.date >= s && t.date <= e);
-  }, [transactions, selMonth, selYear]);
+    return norm.transactions.filter(t => t.date >= s && t.date <= e);
+  }, [norm.transactions, selMonth, selYear]);
 
   const monthlyStats = useMemo(() => {
     const totalIncome = monthlyIncome.reduce((s,i) => s+i.amount, 0);
@@ -53,12 +66,13 @@ export default function ReportsPage() {
   }, [monthlyIncome, monthlyTx, accounts]);
 
   const monthCatSpend = useMemo(() => getCategorySpend(monthlyTx, []), [monthlyTx]);
-  const budgetStatuses = useMemo(() => calculateBudgetStatus(budgets, transactions, fixedExpenses, new Date(), selMonth, selYear), [budgets, transactions, fixedExpenses, selMonth, selYear]);
+  const budgetStatuses = useMemo(() => calculateBudgetStatus(budgets, norm.transactions, fixedExpenses, new Date(), selMonth, selYear), [budgets, norm.transactions, fixedExpenses, selMonth, selYear]);
+  // RAW balances — each account shown in its own native currency (closing balances).
   const balances = useMemo(() => calculateAccountBalances(accounts, income, transactions), [accounts, income, transactions]);
 
   // --- Yearly Data ---
-  const yearlyIncome = useMemo(() => income.filter(i => i.date.startsWith(String(selYear))), [income, selYear]);
-  const yearlyTx = useMemo(() => transactions.filter(t => t.date.startsWith(String(selYear))), [transactions, selYear]);
+  const yearlyIncome = useMemo(() => norm.income.filter(i => i.date.startsWith(String(selYear))), [norm.income, selYear]);
+  const yearlyTx = useMemo(() => norm.transactions.filter(t => t.date.startsWith(String(selYear))), [norm.transactions, selYear]);
   const yearlyStats = useMemo(() => {
     const totalIncome = yearlyIncome.reduce((s,i) => s+i.amount, 0);
     const expenses = yearlyTx.filter(t => t.type==='expense');
@@ -79,12 +93,12 @@ export default function ReportsPage() {
       const m = i + 1;
       const start = `${selYear}-${String(m).padStart(2,'0')}-01`;
       const end = format(endOfMonth(new Date(selYear, i)), 'yyyy-MM-dd');
-      const mIncome = income.filter(x => x.date >= start && x.date <= end).reduce((s,x) => s+x.amount, 0);
-      const mExpense = transactions.filter(t => t.type==='expense' && t.date >= start && t.date <= end).reduce((s,t) => s+t.amount, 0);
-      const mSavings = transactions.filter(t => t.type==='saving' && t.date >= start && t.date <= end).reduce((s,t) => s+t.amount, 0);
+      const mIncome = norm.income.filter(x => x.date >= start && x.date <= end).reduce((s,x) => s+x.amount, 0);
+      const mExpense = norm.transactions.filter(t => t.type==='expense' && t.date >= start && t.date <= end).reduce((s,t) => s+t.amount, 0);
+      const mSavings = norm.transactions.filter(t => t.type==='saving' && t.date >= start && t.date <= end).reduce((s,t) => s+t.amount, 0);
       return { month: MONTHS[i], year: selYear, income: mIncome, expense: mExpense, savings: mSavings, net: mIncome - mExpense - mSavings };
     });
-  }, [income, transactions, selYear]);
+  }, [norm.income, norm.transactions, selYear]);
   const yearlyCatSpend = useMemo(() => getCategorySpend(yearlyTx.filter(t => t.type==='expense'), []), [yearlyTx]);
 
   const categoryTrendData = useMemo(() => {
@@ -95,10 +109,10 @@ export default function ReportsPage() {
       const y = d.getFullYear(); const m = d.getMonth() + 1;
       const start = `${y}-${String(m).padStart(2,'0')}-01`;
       const end = format(endOfMonth(d), 'yyyy-MM-dd');
-      const amount = transactions.filter(t => t.type==='expense' && t.category===trendCategory && t.date>=start && t.date<=end).reduce((s,t) => s+t.amount, 0);
+      const amount = norm.transactions.filter(t => t.type==='expense' && t.category===trendCategory && t.date>=start && t.date<=end).reduce((s,t) => s+t.amount, 0);
       return { month: format(d,'MMM yy'), amount };
     });
-  }, [trendCategory, transactions]);
+  }, [trendCategory, norm.transactions]);
 
   const bestSavingMonth = useMemo(() => {
     const m = trends.reduce((best, t) => t.savings > best.savings ? t : best, { savings:0, month:'—' });
@@ -110,8 +124,8 @@ export default function ReportsPage() {
   }, [trends]);
 
   // --- Custom Date Range ---
-  const customIncome = useMemo(() => income.filter(i => i.date >= startDate && i.date <= endDate), [income, startDate, endDate]);
-  const customTx = useMemo(() => transactions.filter(t => t.date >= startDate && t.date <= endDate), [transactions, startDate, endDate]);
+  const customIncome = useMemo(() => norm.income.filter(i => i.date >= startDate && i.date <= endDate), [norm.income, startDate, endDate]);
+  const customTx = useMemo(() => norm.transactions.filter(t => t.date >= startDate && t.date <= endDate), [norm.transactions, startDate, endDate]);
   const customStats = useMemo(() => {
     const totalIncome = customIncome.reduce((s,i) => s+i.amount, 0);
     const expenses = customTx.filter(t => t.type==='expense');
@@ -244,14 +258,18 @@ export default function ReportsPage() {
           <div className="card card-p">
             <h3 className="section-title text-base mb-3">Closing Balances (All Time)</h3>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-              {balances.filter(b => b.account.is_active && b.account.include_in_dashboard).map(b => (
+              {balances.filter(b => b.account.is_active && b.account.include_in_dashboard).map(b => {
+                // Native-currency display — each account in its own currency, not converted.
+                const acctSym = currencySymbol(b.account.currency || base);
+                return (
                 <div key={b.account.id} className="card card-p !p-3">
                   <p className="text-xs truncate" style={{ color:'var(--text-muted)' }}>{b.account.name}</p>
                   <p className={`text-sm font-bold mt-0.5 ${b.is_credit_card ? (b.outstanding??0)>0?'amount-negative':'text-slate-400' : b.balance>=0?'amount-positive':'amount-negative'}`}>
-                    {b.is_credit_card ? `-${formatCurrency(b.outstanding??0,sym)}` : formatCurrency(b.balance,sym)}
+                    {b.is_credit_card ? `-${formatCurrency(b.outstanding??0,acctSym)}` : formatCurrency(b.balance,acctSym)}
                   </p>
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>
