@@ -863,11 +863,11 @@ export default function DashboardPage() {
               {detail.rows && detail.rows.length > 0 && (
                 <div>
                   <p className="text-xs font-semibold mb-2" style={{ color: 'var(--text-muted)' }}>How it's calculated</p>
-                  <div className="rounded-lg p-3 text-sm" style={{ background: 'var(--bg-secondary, #f8fafc)' }}>
+                  <div className="rounded-lg p-3 text-sm" style={{ background: 'var(--bg-subtle)' }}>
                     {detail.rows.map((r, i) => (
                       <div key={i} className="flex justify-between py-1">
                         <span style={{ color: 'var(--text-secondary)' }}>{r.sign === '-' ? '− ' : r.sign === '+' ? '+ ' : ''}{r.label}</span>
-                        <span className={r.sign === '-' ? 'amount-negative' : ''}>{r.sign === '-' ? '-' : ''}{formatCurrency(r.amount, sym)}</span>
+                        <span className={r.sign === '-' ? 'amount-negative' : 'font-medium'} style={r.sign === '-' ? undefined : { color: 'var(--text-primary)' }}>{r.sign === '-' ? '-' : ''}{formatCurrency(r.amount, sym)}</span>
                       </div>
                     ))}
                     <div className="flex justify-between pt-2 mt-1 border-t border-slate-200 dark:border-slate-700 font-semibold">

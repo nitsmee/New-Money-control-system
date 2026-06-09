@@ -12,6 +12,34 @@ import { useConfirm } from '@/components/ConfirmDialog';
 
 type Tab = 'accounts'|'categories'|'owners'|'preferences';
 
+// Map an arbitrary hex color to the nearest friendly name so the UI shows
+// "Blue" instead of a raw code like "#3b82f6".
+const NAMED_COLORS: { name: string; rgb: [number, number, number] }[] = [
+  { name: 'Red', rgb: [239, 68, 68] }, { name: 'Orange', rgb: [249, 115, 22] },
+  { name: 'Amber', rgb: [245, 158, 11] }, { name: 'Yellow', rgb: [234, 179, 8] },
+  { name: 'Lime', rgb: [132, 204, 22] }, { name: 'Green', rgb: [34, 197, 94] },
+  { name: 'Emerald', rgb: [16, 185, 129] }, { name: 'Teal', rgb: [20, 184, 166] },
+  { name: 'Cyan', rgb: [6, 182, 212] }, { name: 'Sky', rgb: [14, 165, 233] },
+  { name: 'Blue', rgb: [59, 130, 246] }, { name: 'Indigo', rgb: [99, 102, 241] },
+  { name: 'Violet', rgb: [139, 92, 246] }, { name: 'Purple', rgb: [168, 85, 247] },
+  { name: 'Fuchsia', rgb: [217, 70, 239] }, { name: 'Pink', rgb: [236, 72, 153] },
+  { name: 'Rose', rgb: [244, 63, 94] }, { name: 'Brown', rgb: [146, 64, 14] },
+  { name: 'Slate', rgb: [100, 116, 139] }, { name: 'Gray', rgb: [107, 114, 128] },
+  { name: 'Black', rgb: [15, 23, 42] }, { name: 'White', rgb: [248, 250, 252] },
+];
+function colorName(hex: string): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec((hex || '').trim());
+  if (!m) return hex || '—';
+  const n = parseInt(m[1], 16);
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  let best = NAMED_COLORS[0], bestD = Infinity;
+  for (const c of NAMED_COLORS) {
+    const d = (c.rgb[0] - r) ** 2 + (c.rgb[1] - g) ** 2 + (c.rgb[2] - b) ** 2;
+    if (d < bestD) { bestD = d; best = c; }
+  }
+  return best.name;
+}
+
 export default function SettingsPage() {
   const { accounts, categories, owners, settings, addAccount, updateAccount, removeAccount, addCategory, updateCategory, removeCategory, addOwner, updateOwner, removeOwner, updateSettings, setTheme, transactions, income, budgets, goals, fixedExpenses, recurringIncome } = useAppStore();
   const [tab, setTab] = useState<Tab>('accounts');
@@ -420,7 +448,7 @@ export default function SettingsPage() {
                       <td className="font-medium text-sm">{c.name}</td>
                       <td><span className="badge badge-blue text-[10px]">{c.type}</span></td>
                       <td>{c.include_in_budget?<span className="badge badge-green text-[10px]">Yes</span>:<span className="badge badge-gray text-[10px]">No</span>}</td>
-                      <td><span className="flex items-center gap-1.5 text-xs"><span className="w-3.5 h-3.5 rounded-full border border-slate-200" style={{ background:c.color }}/>{c.color}</span></td>
+                      <td><span className="flex items-center gap-1.5 text-xs" title={c.color}><span className="w-3.5 h-3.5 rounded-full border border-slate-200 dark:border-slate-600 flex-shrink-0" style={{ background:c.color }}/>{colorName(c.color)}</span></td>
                       <td className="text-xs">{accounts.find(a => a.id === c.default_account_id)?.name ?? '—'}</td>
                       <td>{c.is_active?<span className="badge badge-green text-[10px]">Active</span>:<span className="badge badge-gray text-[10px]">Inactive</span>}</td>
                       <td>
