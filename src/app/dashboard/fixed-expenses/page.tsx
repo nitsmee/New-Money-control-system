@@ -3,7 +3,7 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import { useAppStore } from '@/lib/store/appStore';
 import { createClient } from '@/lib/supabase/client';
 import { FixedExpense, FixedExpenseType } from '@/types';
-import { formatCurrency, getCurrentPeriod, nextDueDate, formatDate } from '@/lib/utils/calculations';
+import { formatCurrency, getCurrentPeriod, nextDueDate, formatDate, calculateAccountBalances, currencySymbol } from '@/lib/utils/calculations';
 import { runAutoProcess } from '@/lib/utils/autoProcess';
 import toast from 'react-hot-toast';
 import { Plus, Pencil, Trash2, X, Check, Play, AlertTriangle, Calendar, Zap } from 'lucide-react';
@@ -24,7 +24,7 @@ const EMPTY: Omit<FixedExpense, 'id' | 'user_id' | 'created_at' | 'updated_at' |
 
 export default function FixedExpensesPage() {
   const {
-    fixedExpenses, accounts, categories, owners, transactions, isLoading,
+    fixedExpenses, accounts, categories, owners, income, transactions, isLoading,
     addFixedExpense, updateFixedExpense, removeFixedExpense, addTransaction, settings,
   } = useAppStore();
   const [showForm, setShowForm] = useState(false);
@@ -34,8 +34,18 @@ export default function FixedExpensesPage() {
   const [processing, setProcessing] = useState<string | null>(null);
   const sb = createClient();
   const sym = settings?.currency_symbol ?? '₹';
+  const base = settings?.currency ?? 'INR';
+  const rates = settings?.exchange_rates;
   const today = new Date();
   const currentPeriod = getCurrentPeriod();
+
+  // Current balance of every account (native currency), so each card can show
+  // the live "bank balance" the expense is paid from.
+  const balances = useMemo(
+    () => calculateAccountBalances(accounts, income, transactions, rates, base),
+    [accounts, income, transactions, rates, base]
+  );
+  const balOf = (id?: string | null) => balances.find(b => b.account.id === id);
 
   const activeAccounts = useMemo(() => accounts.filter(a => a.is_active), [accounts]);
   const nonCcAccounts = useMemo(() => accounts.filter(a => a.is_active && !a.is_credit_card), [accounts]);
@@ -304,6 +314,8 @@ export default function FixedExpensesPage() {
           const posted = postedThisPeriod(fe);
           const expired = isExpired(fe);
           const nd = nextDueDate(fe, today);
+          // Live balance of the account this expense is paid from (native currency).
+          const fromBal = balOf(fe.from_account_id);
 
           return (
             <div key={fe.id} className={`card card-p group transition-all ${expired ? 'opacity-60' : ''}`}>
@@ -318,6 +330,11 @@ export default function FixedExpensesPage() {
                 <div className="flex justify-between"><span>Due day</span><span className="font-medium" style={{ color: 'var(--text-primary)' }}>{fe.due_day}{fe.due_day === 1 ? 'st' : fe.due_day === 2 ? 'nd' : fe.due_day === 3 ? 'rd' : 'th'} of month</span></div>
                 {!expired && nd && <div className="flex justify-between"><span>Next due</span><span className="font-medium" style={{ color: 'var(--text-primary)' }}>{formatDate(nd)}</span></div>}
                 {fromAcc && <div className="flex justify-between"><span>From</span><span className="font-medium" style={{ color: 'var(--text-primary)' }}>{fromAcc.name}</span></div>}
+                {fromAcc && fromBal && (
+                  <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                    From {fromAcc.name} · {fromBal.is_credit_card ? 'due' : 'bal'} {formatCurrency(fromBal.is_credit_card ? (fromBal.outstanding ?? 0) : fromBal.balance, currencySymbol(fromAcc.currency || base))}
+                  </div>
+                )}
                 {toAcc && <div className="flex justify-between"><span>To</span><span className="font-medium" style={{ color: 'var(--text-primary)' }}>{toAcc.name}</span></div>}
                 {fe.category && <div className="flex justify-between"><span>Category</span><span>{fe.category}</span></div>}
                 {fe.end_date && <div className="flex justify-between"><span>Ends</span><span className={expired ? 'text-red-500' : 'text-amber-600'}>{fe.end_date}</span></div>}

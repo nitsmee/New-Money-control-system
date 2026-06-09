@@ -3,7 +3,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { useAppStore } from '@/lib/store/appStore';
 import { createClient } from '@/lib/supabase/client';
 import { Transaction, TransactionType, TRANSACTION_TYPES } from '@/types';
-import { formatCurrency, currencySymbol, convertAmount } from '@/lib/utils/calculations';
+import { formatCurrency, currencySymbol, convertAmount, runningBalanceByEntry } from '@/lib/utils/calculations';
 import { useDisplayCurrency } from '@/lib/useDisplayCurrency';
 import { format, endOfMonth, startOfMonth, subMonths, startOfYear, endOfYear, subYears } from 'date-fns';
 import toast from 'react-hot-toast';
@@ -52,7 +52,7 @@ const TYPE_COLOR: Record<TransactionType, string> = {
 const DATE_PRESETS = ['This Month', 'Last Month', 'Last 3 Months', 'This Year', 'Last Year', 'All Time', 'Custom'];
 
 export default function TransactionsPage() {
-  const { transactions, accounts, categories, owners, addTransaction, updateTransaction, removeTransaction, settings } = useAppStore();
+  const { transactions, income, accounts, categories, owners, addTransaction, updateTransaction, removeTransaction, settings } = useAppStore();
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Transaction | null>(null);
   const [form, setForm] = useState({ ...EMPTY });
@@ -98,6 +98,14 @@ export default function TransactionsPage() {
   const [displayCur] = useDisplayCurrency(base);
   const symD = currencySymbol(displayCur);
   const curOf = (id?: string | null) => accounts.find(a => a.id === id)?.currency || base;
+
+  // Bank-statement "balance after" for each row: the primary account's native
+  // balance AFTER that entry, computed across the FULL chronological history
+  // (not the filtered/paged subset). Keyed by transaction id.
+  const runningMap = useMemo(
+    () => runningBalanceByEntry(accounts, income, transactions, rates, base),
+    [accounts, income, transactions, rates, base]
+  );
 
   const clearFilters = () => { setSearch(''); setSelCategories([]); setSelAccounts([]); setSelOwners([]); setSelTypes([]); };
   // Apply a quick preset → fills the From/To range.
@@ -647,6 +655,16 @@ export default function TransactionsPage() {
                     <td className="text-xs" style={{ color: 'var(--text-secondary)' }}>{toAcc?.name ?? '—'}</td>
                     <td className={`text-right font-semibold text-sm ${tx.type === 'expense' ? 'amount-negative' : tx.type === 'saving' ? 'text-blue-600 dark:text-blue-400' : 'amount-neutral'}`}>
                       {tx.type === 'expense' ? '-' : ''}{formatCurrency(tx.amount, currencySymbol(curOf(tx.from_account_id ?? tx.to_account_id)))}
+                      {(() => {
+                        const info = runningMap.get(tx.id);
+                        if (!info) return null;
+                        const label = info.isCreditCard ? 'due' : 'bal';
+                        return (
+                          <div className="text-[10px] font-normal" style={{ color: 'var(--text-muted)' }}>
+                            {label} {formatCurrency(info.running, currencySymbol(info.currency))}
+                          </div>
+                        );
+                      })()}
                     </td>
                     <td>
                       <div className="flex items-center justify-end gap-1">

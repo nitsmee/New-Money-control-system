@@ -865,6 +865,87 @@ export function accountLedger(
 }
 
 // ============================================================
+// RUNNING BALANCE PER ENTRY
+// For each income/transaction, the running balance of the PRIMARY account
+// it affects, AFTER that entry — computed across the FULL history in
+// chronological order. Lets every list show a bank-statement "balance after"
+// that stays aligned with calculateAccountBalances / accountLedger.
+// Primary account: income/initial_balance → to-account; everything else →
+// from-account (falling back to to-account). Native currency of that account.
+// ============================================================
+export interface RunningInfo { accountId: string; currency: string; running: number; isCreditCard: boolean; }
+
+function primaryAccountOf(t: Transaction): string | undefined {
+  if (t.type === 'initial_balance') return t.to_account_id ?? undefined;
+  if (t.type === 'adjustment') return (t.to_account_id ?? t.from_account_id) ?? undefined;
+  return (t.from_account_id ?? t.to_account_id) ?? undefined;
+}
+
+export function runningBalanceByEntry(
+  accounts: Account[],
+  income: Income[],
+  transactions: Transaction[],
+  rates?: Record<string, number>,
+  base?: string
+): Map<string, RunningInfo> {
+  const map = new Map<string, RunningInfo>();
+  const ccSet = new Set(accounts.filter(a => a.is_credit_card).map(a => a.id));
+  const isCC = (id?: string | null) => !!id && ccSet.has(id);
+  const curOf = (id?: string | null) => accounts.find(a => a.id === id)?.currency || base || '';
+  const toAcct = (amt: number, fromId?: string | null, toId?: string | null) =>
+    (rates && base) ? convertAmount(amt, curOf(fromId), curOf(toId), rates, base) : amt;
+
+  const bal = new Map<string, number>();
+  accounts.forEach(a => bal.set(a.id, 0));
+  const add = (id: string | null | undefined, delta: number) => { if (!id) return; bal.set(id, (bal.get(id) ?? 0) + delta); };
+
+  interface Ev { id: string; date: string; created_at: string; kind: 'income' | 'tx'; ref: Income | Transaction; }
+  const events: Ev[] = [
+    ...income.map(i => ({ id: i.id, date: i.date, created_at: i.created_at ?? '', kind: 'income' as const, ref: i })),
+    ...transactions.map(t => ({ id: t.id, date: t.date, created_at: t.created_at ?? '', kind: 'tx' as const, ref: t })),
+  ];
+  events.sort((a, b) => a.date.localeCompare(b.date) || a.created_at.localeCompare(b.created_at));
+
+  for (const ev of events) {
+    let primary: string | undefined;
+    if (ev.kind === 'income') {
+      const i = ev.ref as Income;
+      add(i.to_account_id, i.amount);
+      primary = i.to_account_id || undefined;
+    } else {
+      const t = ev.ref as Transaction;
+      switch (t.type) {
+        case 'expense': add(t.from_account_id, isCC(t.from_account_id) ? t.amount : -t.amount); break;
+        case 'transfer': {
+          add(t.from_account_id, isCC(t.from_account_id) ? t.amount : -t.amount);
+          const v = toAcct(t.amount, t.from_account_id, t.to_account_id);
+          add(t.to_account_id, isCC(t.to_account_id) ? -v : v);
+          break;
+        }
+        case 'credit_card_payment':
+          add(t.from_account_id, -t.amount);
+          add(t.to_account_id, -toAcct(t.amount, t.from_account_id, t.to_account_id));
+          break;
+        case 'saving': {
+          add(t.from_account_id, isCC(t.from_account_id) ? t.amount : -t.amount);
+          const v = toAcct(t.amount, t.from_account_id, t.to_account_id);
+          add(t.to_account_id, isCC(t.to_account_id) ? -v : v);
+          break;
+        }
+        case 'initial_balance': add(t.to_account_id, t.amount); break;
+        case 'initial_cc_outstanding': add(t.from_account_id, t.amount); break;
+        case 'adjustment': if (t.to_account_id) add(t.to_account_id, t.amount); else if (t.from_account_id) add(t.from_account_id, -t.amount); break;
+      }
+      primary = primaryAccountOf(t);
+    }
+    if (primary) {
+      map.set(ev.id, { accountId: primary, currency: curOf(primary), running: bal.get(primary) ?? 0, isCreditCard: isCC(primary) });
+    }
+  }
+  return map;
+}
+
+// ============================================================
 // MONTH-OVER-MONTH COMPARISON
 // ============================================================
 export function getMonthTotals(

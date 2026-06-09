@@ -3,7 +3,7 @@ import {
   convertAmount, currencyLabel, currencySymbol, formatCurrency,
   calculateAccountBalances, calculateBudgetStatus, normalizeAmounts,
   analyzeGoal, getMonthTotals, safeDueDate, getDueOccurrences, nextDueDate,
-  accountLedger,
+  accountLedger, runningBalanceByEntry,
 } from './calculations';
 import type { Account, Transaction, Income, Budget, Goal } from '@/types';
 
@@ -275,5 +275,25 @@ describe('accountLedger', () => {
       const expected = b.is_credit_card ? (b.outstanding ?? 0) : b.balance;
       expect(finalRunning).toBe(expected);
     }
+  });
+});
+
+describe('runningBalanceByEntry', () => {
+  const bank = acc({ id: 'bank', name: 'Bank' });
+  const sav = acc({ id: 'sav', name: 'Savings', include_in_goal_savings: true });
+  const accounts = [bank, sav];
+  const income = [inc({ id: 'i1', to_account_id: 'bank', amount: 100000, date: '2026-01-01' })];
+  const txns = [
+    tx({ id: 't1', type: 'expense', from_account_id: 'bank', amount: 20000, date: '2026-01-05' }),
+    tx({ id: 't2', type: 'transfer', from_account_id: 'bank', to_account_id: 'sav', amount: 10000, date: '2026-01-10' }),
+  ];
+
+  it('records the primary account balance after each entry', () => {
+    const m = runningBalanceByEntry(accounts, income, txns);
+    expect(m.get('i1')!.running).toBe(100000);   // income → bank
+    expect(m.get('i1')!.accountId).toBe('bank');
+    expect(m.get('t1')!.running).toBe(80000);     // expense → bank (primary)
+    expect(m.get('t2')!.running).toBe(70000);     // transfer → bank (from = primary)
+    expect(m.get('t2')!.accountId).toBe('bank');
   });
 });

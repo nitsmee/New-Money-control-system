@@ -3,7 +3,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { useAppStore } from '@/lib/store/appStore';
 import { createClient } from '@/lib/supabase/client';
 import { RecurringIncome } from '@/types';
-import { formatCurrency, safeDueDate } from '@/lib/utils/calculations';
+import { formatCurrency, safeDueDate, calculateAccountBalances, currencySymbol } from '@/lib/utils/calculations';
 import { runAutoProcessIncome } from '@/lib/utils/autoProcessIncome';
 import toast from 'react-hot-toast';
 import { Plus, Pencil, Trash2, X, Check, RefreshCw } from 'lucide-react';
@@ -57,7 +57,7 @@ function computeNextDue(dueDay: number, startDate: string, endDate: string | nul
 
 export default function RecurringIncomePage() {
   const {
-    recurringIncome, accounts, settings,
+    recurringIncome, accounts, income, transactions, settings,
     addRecurringIncome, updateRecurringIncome, removeRecurringIncome,
   } = useAppStore();
 
@@ -69,6 +69,16 @@ export default function RecurringIncomePage() {
 
   const sb = createClient();
   const sym = settings?.currency_symbol ?? '₹';
+  const base = settings?.currency ?? 'INR';
+  const rates = settings?.exchange_rates;
+
+  // Current balance of every account (native currency), so each row can show
+  // the live "bank balance" the income lands in.
+  const balances = useMemo(
+    () => calculateAccountBalances(accounts, income, transactions, rates, base),
+    [accounts, income, transactions, rates, base]
+  );
+  const balOf = (id?: string | null) => balances.find(b => b.account.id === id);
 
   // Auto-process any due recurring income entries on page load.
   useEffect(() => {
@@ -390,6 +400,8 @@ export default function RecurringIncomePage() {
               <tbody>
                 {[...active, ...inactive].map(ri => {
                   const toAcc = accounts.find(a => a.id === ri.to_account_id);
+                  // Live balance of the account this income lands in (native currency).
+                  const toBal = balOf(ri.to_account_id);
                   const nextDue = ri.is_active
                     ? computeNextDue(ri.due_day, ri.start_date, ri.end_date)
                     : null;
@@ -403,6 +415,11 @@ export default function RecurringIncomePage() {
                       </td>
                       <td className="text-xs" style={{ color: 'var(--text-secondary)' }}>
                         {toAcc?.name ?? '—'}
+                        {toAcc && toBal && (
+                          <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                            Into {toAcc.name} · bal {formatCurrency(toBal.is_credit_card ? (toBal.outstanding ?? 0) : toBal.balance, currencySymbol(toAcc.currency || base))}
+                          </div>
+                        )}
                       </td>
                       <td className="text-xs">{ri.category}</td>
                       <td className="text-center text-xs">

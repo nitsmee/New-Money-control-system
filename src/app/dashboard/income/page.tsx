@@ -4,7 +4,7 @@ import { format, endOfMonth } from 'date-fns';
 import { useAppStore } from '@/lib/store/appStore';
 import { createClient } from '@/lib/supabase/client';
 import { Income } from '@/types';
-import { formatCurrency, calculateAccountBalances, accountRole, currencySymbol, convertAmount, YEAR_OPTIONS } from '@/lib/utils/calculations';
+import { formatCurrency, calculateAccountBalances, accountRole, currencySymbol, convertAmount, runningBalanceByEntry, YEAR_OPTIONS } from '@/lib/utils/calculations';
 import { useDisplayCurrency } from '@/lib/useDisplayCurrency';
 import toast from 'react-hot-toast';
 import { Plus, Pencil, Trash2, X, Check } from 'lucide-react';
@@ -46,6 +46,10 @@ export default function IncomePage() {
   const incomeCategories = useMemo(() => categories.filter(c => (c.type === 'income' || c.type === 'all') && c.is_active), [categories]);
   const activeAccounts = useMemo(() => accounts.filter(a => a.is_active && !a.is_credit_card), [accounts]);
   const activeOwners = useMemo(() => owners.filter(o => o.is_active), [owners]);
+
+  // Destination-account running balance after each income, computed over the
+  // FULL history (not just the filtered month) so the figures stay correct.
+  const runningMap = useMemo(() => runningBalanceByEntry(accounts, income, transactions, rates, base), [accounts, income, transactions, rates, base]);
 
   const filtered = useMemo(() => {
     const start = `${filterYear}-${String(filterMonth).padStart(2, '0')}-01`;
@@ -293,7 +297,15 @@ export default function IncomePage() {
                 return (
                   <tr key={inc.id}>
                     <td className="text-xs whitespace-nowrap" style={{ color: 'var(--text-muted)' }}>{inc.date}</td>
-                    <td><span className="amount-positive font-semibold">{formatCurrency(inc.amount, currencySymbol(curOf(inc.to_account_id)))}</span></td>
+                    <td>
+                      <span className="amount-positive font-semibold">{formatCurrency(inc.amount, currencySymbol(curOf(inc.to_account_id)))}</span>
+                      {(() => {
+                        const info = runningMap.get(inc.id);
+                        return info
+                          ? <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>bal {formatCurrency(info.running, currencySymbol(info.currency))}</div>
+                          : null;
+                      })()}
+                    </td>
                     <td><span className="badge badge-green text-[10px]">{inc.category}</span></td>
                     <td className="text-sm" style={{ color: 'var(--text-secondary)' }}>{inc.source || '—'}</td>
                     <td><span className="badge badge-blue text-[10px]">{inc.owner_purpose}</span></td>
