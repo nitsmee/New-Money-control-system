@@ -11,6 +11,7 @@ import { Plus, Pencil, Trash2, X, Check, Upload } from 'lucide-react';
 import { DuplicateWarning } from '@/components/DuplicateWarning';
 import { QuickAddModal } from '@/components/QuickAddModal';
 import { CSVImportModal } from '@/components/CSVImportModal';
+import { MultiSelect } from '@/components/MultiSelect';
 
 const EMPTY = {
   date: new Date().toISOString().split('T')[0],
@@ -60,11 +61,13 @@ export default function TransactionsPage() {
   const [fromDate, setFromDate] = useState(() => format(startOfMonth(new Date()), 'yyyy-MM-dd'));
   const [toDate, setToDate] = useState(() => format(endOfMonth(new Date()), 'yyyy-MM-dd'));
   const [datePreset, setDatePreset] = useState('This Month');
-  const [filterType, setFilterType] = useState<TransactionType | 'all'>('all');
-  // Extra filters + sorting
-  const [filterCategory, setFilterCategory] = useState('');
-  const [filterAccount, setFilterAccount] = useState('');
-  const [filterOwner, setFilterOwner] = useState('');
+  // Multi-select filters: empty array = no filter (all). Note these hold the
+  // SELECTED values; the dropdown OPTION lists live in `filterCategories` /
+  // `filterOwners` memos below.
+  const [selTypes, setSelTypes] = useState<string[]>([]);
+  const [selCategories, setSelCategories] = useState<string[]>([]);
+  const [selAccounts, setSelAccounts] = useState<string[]>([]);
+  const [selOwners, setSelOwners] = useState<string[]>([]);
   const [search, setSearch] = useState('');
   const [sortKey, setSortKey] = useState<'date' | 'amount'>('date');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -96,7 +99,7 @@ export default function TransactionsPage() {
   const symD = currencySymbol(displayCur);
   const curOf = (id?: string | null) => accounts.find(a => a.id === id)?.currency || base;
 
-  const clearFilters = () => { setSearch(''); setFilterCategory(''); setFilterAccount(''); setFilterOwner(''); setFilterType('all'); };
+  const clearFilters = () => { setSearch(''); setSelCategories([]); setSelAccounts([]); setSelOwners([]); setSelTypes([]); };
   // Apply a quick preset → fills the From/To range.
   const applyDatePreset = (p: string) => {
     setDatePreset(p);
@@ -139,10 +142,10 @@ export default function TransactionsPage() {
     const rows = transactions.filter(t => {
       if (fromDate && t.date < fromDate) return false;
       if (toDate && t.date > toDate) return false;
-      if (filterType !== 'all' && t.type !== filterType) return false;
-      if (filterCategory && t.category !== filterCategory) return false;
-      if (filterAccount && t.from_account_id !== filterAccount && t.to_account_id !== filterAccount) return false;
-      if (filterOwner && t.owner_purpose !== filterOwner) return false;
+      if (!(selTypes.length === 0 || selTypes.includes(t.type))) return false;
+      if (!(selCategories.length === 0 || (t.category && selCategories.includes(t.category)))) return false;
+      if (!(selAccounts.length === 0 || (t.from_account_id && selAccounts.includes(t.from_account_id)) || (t.to_account_id && selAccounts.includes(t.to_account_id)))) return false;
+      if (!(selOwners.length === 0 || (t.owner_purpose && selOwners.includes(t.owner_purpose)))) return false;
       if (q) {
         const hay = `${t.description ?? ''} ${t.category ?? ''} ${t.owner_purpose ?? ''} ${t.notes ?? ''} ${t.amount}`.toLowerCase();
         if (!hay.includes(q)) return false;
@@ -154,7 +157,7 @@ export default function TransactionsPage() {
       return sortDir === 'asc' ? cmp : -cmp;
     });
     return rows;
-  }, [transactions, fromDate, toDate, filterType, filterCategory, filterAccount, filterOwner, search, sortKey, sortDir, convDisp]);
+  }, [transactions, fromDate, toDate, selTypes, selCategories, selAccounts, selOwners, search, sortKey, sortDir, convDisp]);
 
   // Client-side pagination of the rendered rows. `filtered` stays the full
   // filtered set (so summary sums + bulk operations cover everything); only the
@@ -170,7 +173,7 @@ export default function TransactionsPage() {
   // Reset to page 1 whenever the filtered set or page size changes.
   useEffect(() => {
     setPage(1);
-  }, [fromDate, toDate, filterType, filterCategory, filterAccount, filterOwner, search, sortKey, sortDir, pageSize]);
+  }, [fromDate, toDate, selTypes, selCategories, selAccounts, selOwners, search, sortKey, sortDir, pageSize]);
 
   // Summary of the currently-filtered rows (all amounts converted to display
   // currency). Drives the count + per-type sums + filtered total.
@@ -385,23 +388,31 @@ export default function TransactionsPage() {
           <input type="date" className="form-input text-sm py-1.5 px-2 w-auto" value={fromDate} onChange={e => { setFromDate(e.target.value); setDatePreset('Custom'); }} title="From date" />
           <span className="text-xs" style={{ color: 'var(--text-muted)' }}>to</span>
           <input type="date" className="form-input text-sm py-1.5 px-2 w-auto" value={toDate} onChange={e => { setToDate(e.target.value); setDatePreset('Custom'); }} title="To date" />
-          <select className="form-select text-sm py-1.5 px-3 w-auto" value={filterType} onChange={e => setFilterType(e.target.value as any)}>
-            <option value="all">All Types</option>
-            {TRANSACTION_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-          </select>
-          <select className="form-select text-sm py-1.5 px-3 w-auto" value={filterCategory} onChange={e => setFilterCategory(e.target.value)}>
-            <option value="">All Categories</option>
-            {filterCategories.map(c => <option key={c} value={c}>{c}</option>)}
-          </select>
-          <select className="form-select text-sm py-1.5 px-3 w-auto" value={filterAccount} onChange={e => setFilterAccount(e.target.value)}>
-            <option value="">All Accounts</option>
-            {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-          </select>
-          <select className="form-select text-sm py-1.5 px-3 w-auto" value={filterOwner} onChange={e => setFilterOwner(e.target.value)}>
-            <option value="">All Owners</option>
-            {filterOwners.map(o => <option key={o} value={o}>{o}</option>)}
-          </select>
-          {(search || filterCategory || filterAccount || filterOwner || filterType !== 'all') && (
+          <MultiSelect
+            value={selTypes}
+            onChange={setSelTypes}
+            options={TRANSACTION_TYPES.map(t => ({ value: t.value, label: t.label }))}
+            placeholder="All Types"
+          />
+          <MultiSelect
+            value={selCategories}
+            onChange={setSelCategories}
+            options={filterCategories.map(c => ({ value: c, label: c }))}
+            placeholder="All Categories"
+          />
+          <MultiSelect
+            value={selAccounts}
+            onChange={setSelAccounts}
+            options={accounts.map(a => ({ value: a.id, label: a.name }))}
+            placeholder="All Accounts"
+          />
+          <MultiSelect
+            value={selOwners}
+            onChange={setSelOwners}
+            options={filterOwners.map(o => ({ value: o, label: o }))}
+            placeholder="All Owners"
+          />
+          {(search || selCategories.length > 0 || selAccounts.length > 0 || selOwners.length > 0 || selTypes.length > 0) && (
             <button onClick={clearFilters} className="btn-md btn-secondary text-xs py-1.5 px-3">Clear filters</button>
           )}
         </div>
@@ -609,7 +620,7 @@ export default function TransactionsPage() {
             <tbody>
               {filtered.length === 0 && (
                 <tr><td colSpan={10} className="text-center py-10 text-sm" style={{ color: 'var(--text-muted)' }}>
-                  {search || filterCategory || filterAccount || filterOwner || filterType !== 'all'
+                  {search || selCategories.length > 0 || selAccounts.length > 0 || selOwners.length > 0 || selTypes.length > 0
                     ? 'No transactions match your filters. Try clearing some.'
                     : 'No transactions for this period. Click "Add Transaction" to start.'}
                 </td></tr>

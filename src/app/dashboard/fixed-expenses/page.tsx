@@ -109,9 +109,13 @@ export default function FixedExpensesPage() {
 
   const handleSave = async () => {
     if (!form.name || !form.amount || !form.due_day) { toast.error('Name, amount, and due day are required'); return; }
+    if (form.due_day < 1 || form.due_day > 31) { toast.error('Due day must be between 1 and 31'); return; }
     if (!form.from_account_id) { toast.error('Please select a "From Account"'); return; }
     if ((form.type === 'saving' || form.type === 'investment' || form.type === 'transfer') && !form.to_account_id) {
       toast.error('Please select a "To Account" — savings/investments must land in an account'); return;
+    }
+    if ((form.type === 'saving' || form.type === 'investment' || form.type === 'transfer') && form.from_account_id === form.to_account_id) {
+      toast.error('From and To accounts must be different'); return;
     }
     setSaving(true);
     try {

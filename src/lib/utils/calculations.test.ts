@@ -3,6 +3,7 @@ import {
   convertAmount, currencyLabel, currencySymbol, formatCurrency,
   calculateAccountBalances, calculateBudgetStatus, normalizeAmounts,
   analyzeGoal, getMonthTotals, safeDueDate, getDueOccurrences, nextDueDate,
+  accountLedger,
 } from './calculations';
 import type { Account, Transaction, Income, Budget, Goal } from '@/types';
 
@@ -244,5 +245,35 @@ describe('recurring date helpers', () => {
       new Date(2026, 2, 15) // 15 Mar — the 10th has passed
     );
     expect(next).toBe('2026-04-10');
+  });
+});
+
+describe('accountLedger', () => {
+  const bank = acc({ id: 'bank', name: 'Bank' });
+  const sav = acc({ id: 'sav', name: 'Savings', include_in_goal_savings: true });
+  const cc = acc({ id: 'cc', name: 'Card', is_credit_card: true });
+  const accounts = [bank, sav, cc];
+  const income = [inc({ id: 'i1', to_account_id: 'bank', amount: 100000, date: '2026-01-01' })];
+  const txns = [
+    tx({ id: 't1', type: 'expense', from_account_id: 'bank', amount: 20000, date: '2026-01-05' }),
+    tx({ id: 't2', type: 'transfer', from_account_id: 'bank', to_account_id: 'sav', amount: 10000, date: '2026-01-10' }),
+    tx({ id: 't3', type: 'saving', from_account_id: 'bank', to_account_id: 'sav', amount: 5000, date: '2026-01-15' }),
+  ];
+
+  it('produces a chronological running balance', () => {
+    const led = accountLedger('bank', accounts, income, txns);
+    expect(led.map(e => e.running)).toEqual([100000, 80000, 70000, 65000]);
+    expect(led[0].date).toBe('2026-01-01'); // oldest first
+  });
+
+  it('final running balance matches calculateAccountBalances', () => {
+    const bals = calculateAccountBalances(accounts, income, txns);
+    for (const a of accounts) {
+      const led = accountLedger(a.id, accounts, income, txns);
+      const finalRunning = led.length ? led[led.length - 1].running : 0;
+      const b = bals.find(x => x.account.id === a.id)!;
+      const expected = b.is_credit_card ? (b.outstanding ?? 0) : b.balance;
+      expect(finalRunning).toBe(expected);
+    }
   });
 });

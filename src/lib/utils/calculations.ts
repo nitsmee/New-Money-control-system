@@ -791,6 +791,80 @@ export function normalizeAmounts(
 }
 
 // ============================================================
+// ACCOUNT LEDGER — a running-balance statement for one account
+// Every entry that touches the account, oldest → newest, with the
+// signed effect (delta) and the running balance after it. The final
+// `running` value equals this account's balance/outstanding, so a user
+// can trace exactly how the current number was reached. Native currency.
+// ============================================================
+export interface LedgerEntry {
+  id: string;
+  date: string;
+  label: string;
+  type: string;       // transaction type, or 'income'
+  delta: number;      // signed effect on this account (native currency)
+  running: number;    // running balance after this entry
+  isCreditCard: boolean;
+}
+
+export function accountLedger(
+  accountId: string,
+  accounts: Account[],
+  income: Income[],
+  transactions: Transaction[],
+  rates?: Record<string, number>,
+  base?: string
+): LedgerEntry[] {
+  const account = accounts.find(a => a.id === accountId);
+  if (!account) return [];
+  const isCC = !!account.is_credit_card;
+  const curOf = (id?: string | null) => accounts.find(a => a.id === id)?.currency || base || '';
+  // Convert a cross-currency leg INTO this account's currency.
+  const toThis = (amt: number, fromId?: string | null) =>
+    (rates && base) ? convertAmount(amt, curOf(fromId), curOf(accountId), rates, base) : amt;
+
+  interface Ev { id: string; date: string; created_at: string; label: string; type: string; delta: number; }
+  const events: Ev[] = [];
+
+  income.filter(i => i.to_account_id === accountId).forEach(i => {
+    events.push({ id: i.id, date: i.date, created_at: i.created_at ?? '', label: i.description || i.source || i.category || 'Income', type: 'income', delta: i.amount });
+  });
+
+  transactions.forEach(t => {
+    const fromMe = t.from_account_id === accountId;
+    const toMe = t.to_account_id === accountId;
+    if (!fromMe && !toMe) return;
+    let delta = 0;
+    switch (t.type) {
+      case 'expense': if (fromMe) delta = isCC ? t.amount : -t.amount; break;
+      case 'transfer':
+        if (fromMe) delta += isCC ? t.amount : -t.amount;
+        if (toMe) { const v = toThis(t.amount, t.from_account_id); delta += isCC ? -v : v; }
+        break;
+      case 'credit_card_payment':
+        if (fromMe) delta += -t.amount;
+        if (toMe) delta += -toThis(t.amount, t.from_account_id);
+        break;
+      case 'saving':
+        if (fromMe) delta += isCC ? t.amount : -t.amount;
+        if (toMe) { const v = toThis(t.amount, t.from_account_id); delta += isCC ? -v : v; }
+        break;
+      case 'initial_balance': if (toMe) delta = t.amount; break;
+      case 'initial_cc_outstanding': if (fromMe) delta = t.amount; break;
+      case 'adjustment': if (toMe) delta = t.amount; else if (fromMe) delta = -t.amount; break;
+    }
+    events.push({ id: t.id, date: t.date, created_at: t.created_at ?? '', label: t.description || t.category || t.type.replace(/_/g, ' '), type: t.type, delta });
+  });
+
+  events.sort((a, b) => a.date.localeCompare(b.date) || a.created_at.localeCompare(b.created_at));
+  let running = 0;
+  return events.map(e => {
+    running += e.delta;
+    return { id: e.id, date: e.date, label: e.label, type: e.type, delta: e.delta, running, isCreditCard: isCC };
+  });
+}
+
+// ============================================================
 // MONTH-OVER-MONTH COMPARISON
 // ============================================================
 export function getMonthTotals(

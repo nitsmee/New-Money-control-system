@@ -644,7 +644,7 @@ export default function DashboardPage() {
             })}
           </div>
           {ccBalances.some(b => (b.outstanding ?? 0) === 0) && (
-            <p className="text-xs mt-3" style={{ color: 'var(--text-muted)' }}>{ccBalances.filter(b => (b.outstanding ?? 0) === 0).length} card(s) at ₹0 hidden.</p>
+            <p className="text-xs mt-3" style={{ color: 'var(--text-muted)' }}>{ccBalances.filter(b => (b.outstanding ?? 0) === 0).length} card(s) at {sym}0 hidden.</p>
           )}
         </div>
 

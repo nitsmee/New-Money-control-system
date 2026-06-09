@@ -8,7 +8,7 @@ import { useAppStore } from '@/lib/store/appStore';
 import {
   LayoutDashboard, TrendingUp, ArrowLeftRight, Repeat, PieChart, Target,
   BarChart3, Settings, Bell, LogOut, Menu, X, ChevronLeft, Sun, Moon,
-  Monitor, Wallet, Landmark, Search
+  Monitor, Wallet, Landmark, Search, CalendarClock
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { GlobalSearch } from '@/components/GlobalSearch';
@@ -19,9 +19,9 @@ import { FinanceBot } from '@/components/FinanceBot';
 
 const NAV = [
   { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, key: 'D' },
-  { label: 'Accounts', href: '/dashboard/accounts', icon: Landmark, key: '' },
+  { label: 'Accounts', href: '/dashboard/accounts', icon: Landmark, key: 'A' },
   { label: 'Income', href: '/dashboard/income', icon: TrendingUp, key: 'I' },
-  { label: 'Recurring Income', href: '/dashboard/recurring-income', icon: Repeat, key: '' },
+  { label: 'Recurring Income', href: '/dashboard/recurring-income', icon: CalendarClock, key: '' },
   { label: 'Transactions', href: '/dashboard/transactions', icon: ArrowLeftRight, key: 'T' },
   { label: 'Fixed Expenses', href: '/dashboard/fixed-expenses', icon: Repeat, key: '' },
   { label: 'Budget', href: '/dashboard/budget', icon: PieChart, key: 'B' },
@@ -29,6 +29,16 @@ const NAV = [
   { label: 'Reports', href: '/dashboard/reports', icon: BarChart3, key: 'R' },
   { label: 'Alerts', href: '/dashboard/alerts', icon: Bell, key: '' },
   { label: 'Settings', href: '/dashboard/settings', icon: Settings, key: ',' },
+];
+
+// The five most-used pages for the mobile bottom bar (full list is in the
+// hamburger menu). Reports is here by request; Recurring Income lives in the menu.
+const MOBILE_NAV = [
+  { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+  { label: 'Transactions', href: '/dashboard/transactions', icon: ArrowLeftRight },
+  { label: 'Budget', href: '/dashboard/budget', icon: PieChart },
+  { label: 'Reports', href: '/dashboard/reports', icon: BarChart3 },
+  { label: 'Settings', href: '/dashboard/settings', icon: Settings },
 ];
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -126,6 +136,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       ) return;
       switch (e.key) {
         case 'd': router.push('/dashboard'); break;
+        case 'a': router.push('/dashboard/accounts'); break;
         case 't': router.push('/dashboard/transactions'); break;
         case 'i': router.push('/dashboard/income'); break;
         case 'b': router.push('/dashboard/budget'); break;
@@ -323,7 +334,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
         {/* Mobile bottom nav */}
         <nav className="lg:hidden flex border-t border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 pb-safe">
-          {NAV.slice(0, 5).map(({ label, href, icon: Icon }) => {
+          {MOBILE_NAV.map(({ label, href, icon: Icon }) => {
             const active = href === '/dashboard' ? pathname === href : pathname.startsWith(href);
             return (
               <Link key={href} href={href} className={`flex-1 flex flex-col items-center gap-0.5 py-2 text-[10px] font-medium transition-colors

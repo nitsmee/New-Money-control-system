@@ -3,7 +3,7 @@ import { useState, useMemo } from 'react';
 import { useAppStore } from '@/lib/store/appStore';
 import { createClient } from '@/lib/supabase/client';
 import { Transaction } from '@/types';
-import { calculateAccountBalances, accountRole, formatCurrency, formatDate } from '@/lib/utils/calculations';
+import { calculateAccountBalances, accountRole, formatCurrency, formatDate, accountLedger, currencySymbol } from '@/lib/utils/calculations';
 import toast from 'react-hot-toast';
 import { Plus, X, Check, ArrowDownLeft, ArrowUpRight, Wallet, PiggyBank, TrendingUp, Users, CreditCard } from 'lucide-react';
 
@@ -23,6 +23,7 @@ export default function AccountsPage() {
   const sym = settings?.currency_symbol ?? '₹';
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [drawerView, setDrawerView] = useState<'recent' | 'statement'>('recent');
   const [qa, setQa] = useState({
     type: 'expense' as QAType,
     date: new Date().toISOString().split('T')[0],
@@ -50,6 +51,7 @@ export default function AccountsPage() {
   );
 
   const selected = selectedId ? balOf(selectedId) : null;
+  const selectedAccount = selected?.account ?? null;
   const selectedTx = useMemo(() => {
     if (!selectedId) return [];
     return transactions
@@ -58,8 +60,15 @@ export default function AccountsPage() {
       .slice(0, 30);
   }, [transactions, selectedId]);
 
+  // Full running-balance statement for the selected account (native currency, oldest → newest).
+  const ledger = useMemo(
+    () => selectedAccount ? accountLedger(selectedAccount.id, accounts, income, transactions, settings?.exchange_rates, settings?.currency ?? 'INR') : [],
+    [selectedAccount, accounts, income, transactions, settings]
+  );
+
   const openAccount = (id: string) => {
     setSelectedId(id);
+    setDrawerView('recent');
     setQa({
       type: 'expense',
       date: new Date().toISOString().split('T')[0],
@@ -244,33 +253,115 @@ export default function AccountsPage() {
               </button>
             </div>
 
-            {/* Recent transactions */}
+            {/* Recent vs full Statement */}
             <div className="p-5">
-              <p className="text-sm font-semibold mb-3">Recent transactions</p>
-              {selectedTx.length === 0 && (
-                <p className="text-sm" style={{ color: 'var(--text-muted)' }}>No transactions for this account yet.</p>
-              )}
-              <div className="space-y-2">
-                {selectedTx.map(t => {
-                  const outflow = t.from_account_id === selectedId;
-                  return (
-                    <div key={t.id} className="flex items-center justify-between gap-2 py-1.5 border-b border-slate-50 dark:border-slate-800 last:border-0">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="inline-flex items-center justify-center w-6 h-6 rounded-full flex-shrink-0" style={{ background: 'var(--bg-subtle, rgba(125,125,125,0.12))' }}>
-                          {outflow ? <ArrowUpRight size={13} style={{ color: 'var(--text-danger)' }} /> : <ArrowDownLeft size={13} style={{ color: 'var(--text-success)' }} />}
-                        </span>
-                        <div className="min-w-0">
-                          <p className="text-sm truncate">{t.description || t.category || t.type}</p>
-                          <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{formatDate(t.date)}{t.category ? ` · ${t.category}` : ''}</p>
-                        </div>
-                      </div>
-                      <span className="text-sm font-semibold flex-shrink-0" style={{ color: outflow ? 'var(--text-danger)' : 'var(--text-success)' }}>
-                        {outflow ? '−' : '+'}{formatCurrency(t.amount, sym)}
-                      </span>
-                    </div>
-                  );
-                })}
+              <div className="flex gap-2 mb-3">
+                {(['recent', 'statement'] as const).map(v => (
+                  <button
+                    key={v}
+                    onClick={() => setDrawerView(v)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${drawerView === v ? 'bg-blue-600 text-white border-blue-600' : 'border-slate-200 dark:border-slate-700'}`}
+                  >
+                    {v === 'recent' ? 'Recent' : 'Statement'}
+                  </button>
+                ))}
               </div>
+
+              {drawerView === 'recent' ? (
+                <>
+                  {selectedTx.length === 0 && (
+                    <p className="text-sm" style={{ color: 'var(--text-muted)' }}>No transactions for this account yet.</p>
+                  )}
+                  <div className="space-y-2">
+                    {selectedTx.map(t => {
+                      const outflow = t.from_account_id === selectedId;
+                      return (
+                        <div key={t.id} className="flex items-center justify-between gap-2 py-1.5 border-b border-slate-50 dark:border-slate-800 last:border-0">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="inline-flex items-center justify-center w-6 h-6 rounded-full flex-shrink-0" style={{ background: 'var(--bg-subtle, rgba(125,125,125,0.12))' }}>
+                              {outflow ? <ArrowUpRight size={13} style={{ color: 'var(--text-danger)' }} /> : <ArrowDownLeft size={13} style={{ color: 'var(--text-success)' }} />}
+                            </span>
+                            <div className="min-w-0">
+                              <p className="text-sm truncate">{t.description || t.category || t.type}</p>
+                              <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{formatDate(t.date)}{t.category ? ` · ${t.category}` : ''}</p>
+                            </div>
+                          </div>
+                          <span className="text-sm font-semibold flex-shrink-0" style={{ color: outflow ? 'var(--text-danger)' : 'var(--text-success)' }}>
+                            {outflow ? '−' : '+'}{formatCurrency(t.amount, sym)}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              ) : (
+                (() => {
+                  const base = settings?.currency ?? 'INR';
+                  const accSym = currencySymbol(selectedAccount?.currency || base);
+                  const isCC = !!selected.is_credit_card;
+                  const finalRunning = ledger.length ? ledger[ledger.length - 1].running : 0;
+                  const ROW_CAP = 300;
+                  const display = [...ledger].reverse(); // newest → oldest, keeping each row's own running
+                  const capped = display.length > ROW_CAP;
+                  const rows = capped ? display.slice(0, ROW_CAP) : display;
+                  return (
+                    <>
+                      <p className="text-sm font-semibold mb-1">Statement</p>
+                      {ledger.length === 0 ? (
+                        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>No entries for this account yet.</p>
+                      ) : (
+                        <>
+                          <div className="flex items-center flex-wrap gap-x-1.5 gap-y-0.5 text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>
+                            <span>Opening: {formatCurrency(0, accSym)}</span>
+                            <span style={{ color: 'var(--text-muted)' }}>→ … →</span>
+                            <span className="font-semibold" style={{ color: isCC ? 'var(--text-danger)' : 'var(--text-primary)' }}>
+                              Current: {formatCurrency(finalRunning, accSym)}
+                            </span>
+                          </div>
+                          <p className="text-[11px] mb-3" style={{ color: 'var(--text-muted)' }}>
+                            This is every entry that affected this account, oldest to newest — the {isCC ? 'Outstanding' : 'Running'} column shows exactly how the current balance was reached.
+                          </p>
+                          {capped && (
+                            <p className="text-[11px] mb-2" style={{ color: 'var(--text-muted)' }}>
+                              Showing the most recent {ROW_CAP} of {display.length} entries.
+                            </p>
+                          )}
+                          <div className="overflow-y-auto" style={{ maxHeight: '24rem' }}>
+                            <table className="w-full text-xs border-collapse">
+                              <thead className="sticky top-0" style={{ background: 'var(--bg-card, var(--bg-surface, #fff))' }}>
+                                <tr style={{ color: 'var(--text-muted)' }} className="text-left">
+                                  <th className="py-1.5 pr-2 font-medium">Date</th>
+                                  <th className="py-1.5 pr-2 font-medium">Description</th>
+                                  <th className="py-1.5 pr-2 font-medium text-right">Amount</th>
+                                  <th className="py-1.5 font-medium text-right">{isCC ? 'Outstanding' : 'Running'}</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {rows.map(e => {
+                                  const positive = e.delta >= 0;
+                                  return (
+                                    <tr key={e.id} className="border-b border-slate-50 dark:border-slate-800 last:border-0 align-top">
+                                      <td className="py-1.5 pr-2 whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{formatDate(e.date)}</td>
+                                      <td className="py-1.5 pr-2">
+                                        <span className="block truncate max-w-[10rem]">{e.label}</span>
+                                        <span className="badge badge-gray text-[9px]">{e.type.replace(/_/g, ' ')}</span>
+                                      </td>
+                                      <td className="py-1.5 pr-2 text-right whitespace-nowrap font-medium" style={{ color: positive ? 'var(--text-success)' : 'var(--text-danger)' }}>
+                                        {positive ? '+' : '−'}{formatCurrency(Math.abs(e.delta), accSym)}
+                                      </td>
+                                      <td className="py-1.5 text-right whitespace-nowrap font-semibold">{formatCurrency(e.running, accSym)}</td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </>
+                      )}
+                    </>
+                  );
+                })()
+              )}
             </div>
           </div>
         </div>
