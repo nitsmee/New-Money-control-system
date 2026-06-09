@@ -9,6 +9,7 @@ import toast from 'react-hot-toast';
 import { Plus, Pencil, Trash2, X, Check, Target, CheckCircle, AlertTriangle, Clock, TrendingUp, Flag, Sparkles, SlidersHorizontal } from 'lucide-react';
 import { RadialBarChart, RadialBar, ResponsiveContainer } from 'recharts';
 import { addMonths, format, parseISO, differenceInCalendarMonths } from 'date-fns';
+import { useConfirm } from '@/components/ConfirmDialog';
 
 type AllocMode = 'auto' | 'manual';
 const ALLOC_MODE_KEY = 'mcs_goal_alloc_mode';
@@ -90,6 +91,7 @@ export default function GoalsPage() {
   const [form, setForm] = useState<typeof EMPTY>({...EMPTY});
   const [saving, setSaving] = useState(false);
   const sb = createClient();
+  const confirm = useConfirm();
 
   // ---- Allocation mode (persisted) ----
   // 'auto'   = shared savings pool is allocated to active goals by priority.
@@ -226,7 +228,7 @@ export default function GoalsPage() {
   };
 
   const handleDelete = async (g: Goal) => {
-    if (!confirm(`Delete goal "${g.name}"?`)) return;
+    if (!(await confirm({ title:'Delete goal?', message:`Delete goal "${g.name}"?`, confirmLabel:'Delete', danger:true }))) return;
     try {
       const { error } = await sb.from('goals').delete().eq('id',g.id);
       if (error) throw error;

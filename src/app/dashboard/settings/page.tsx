@@ -8,6 +8,7 @@ import { Plus, Pencil, Trash2, X, Check, Settings, Database, User, Tag, Wallet, 
 import Papa from 'papaparse';
 import { currencyLabel, currencySymbol, CURRENCY_CODES } from '@/lib/utils/calculations';
 import { CurrencySelect } from '@/components/CurrencySelect';
+import { useConfirm } from '@/components/ConfirmDialog';
 
 type Tab = 'accounts'|'categories'|'owners'|'preferences';
 
@@ -15,6 +16,7 @@ export default function SettingsPage() {
   const { accounts, categories, owners, settings, addAccount, updateAccount, removeAccount, addCategory, updateCategory, removeCategory, addOwner, updateOwner, removeOwner, updateSettings, setTheme, transactions, income, budgets, goals, fixedExpenses, recurringIncome } = useAppStore();
   const [tab, setTab] = useState<Tab>('accounts');
   const sb = createClient();
+  const confirm = useConfirm();
   const sym = settings?.currency_symbol ?? '₹';
 
   // ---- ACCOUNTS ----
@@ -53,12 +55,12 @@ export default function SettingsPage() {
 
   const deleteAcc = async (a: Account) => {
     if (hasTransactions(a.id)) {
-      if (!confirm(`"${a.name}" has transactions. It will be deactivated (not deleted) to preserve history.`)) return;
+      if (!(await confirm({ title:'Deactivate account?', message:`"${a.name}" has transactions. It will be deactivated (not deleted) to preserve history.`, confirmLabel:'Deactivate' }))) return;
       const { error } = await sb.from('accounts').update({ is_active:false }).eq('id',a.id);
       if (!error) { updateAccount(a.id, { is_active:false }); toast.success(`"${a.name}" deactivated`); }
       return;
     }
-    if (!confirm(`Delete account "${a.name}"?`)) return;
+    if (!(await confirm({ title:'Delete account?', message:`Delete account "${a.name}"? This cannot be undone.`, confirmLabel:'Delete', danger:true }))) return;
     const { error } = await sb.from('accounts').delete().eq('id',a.id);
     if (!error) { removeAccount(a.id); toast.success('Account deleted'); }
     else toast.error(error.message);
@@ -97,12 +99,12 @@ export default function SettingsPage() {
 
   const deleteCat = async (c: Category) => {
     if (hasCatTransactions(c.name)) {
-      if (!confirm(`"${c.name}" has transactions. It will be deactivated to preserve history.`)) return;
+      if (!(await confirm({ title:'Deactivate category?', message:`"${c.name}" has transactions. It will be deactivated to preserve history.`, confirmLabel:'Deactivate' }))) return;
       const { error } = await sb.from('categories').update({ is_active:false }).eq('id',c.id);
       if (!error) { updateCategory(c.id, { is_active:false }); toast.success(`"${c.name}" deactivated`); }
       return;
     }
-    if (!confirm(`Delete category "${c.name}"?`)) return;
+    if (!(await confirm({ title:'Delete category?', message:`Delete category "${c.name}"?`, confirmLabel:'Delete', danger:true }))) return;
     const { error } = await sb.from('categories').delete().eq('id',c.id);
     if (!error) { removeCategory(c.id); toast.success('Category deleted'); }
     else toast.error(error.message);

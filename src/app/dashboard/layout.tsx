@@ -17,6 +17,7 @@ import { OnboardingWizard } from '@/components/OnboardingWizard';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { FinanceBot } from '@/components/FinanceBot';
 import { OfflineBanner } from '@/components/OfflineBanner';
+import { ConfirmProvider } from '@/components/ConfirmDialog';
 
 const NAV = [
   { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, key: 'D' },
@@ -331,7 +332,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
         {/* Page content */}
         <main className="flex-1 overflow-y-auto p-4 sm:p-6 animate-fade-in">
-          <ErrorBoundary>{children}</ErrorBoundary>
+          <ConfirmProvider>
+            <ErrorBoundary>{children}</ErrorBoundary>
+          </ConfirmProvider>
         </main>
 
         {/* Mobile bottom nav */}

@@ -9,6 +9,7 @@ import { getDaysInMonth } from 'date-fns';
 import toast from 'react-hot-toast';
 import { Plus, Pencil, Trash2, X, Check, TrendingUp, AlertTriangle, CheckCircle } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { useConfirm } from '@/components/ConfirmDialog';
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
@@ -21,6 +22,7 @@ export default function BudgetPage() {
   const [selMonth, setSelMonth] = useState(new Date().getMonth() + 1);
   const [selYear, setSelYear] = useState(new Date().getFullYear());
   const sb = createClient();
+  const confirm = useConfirm();
   const today = new Date();
 
   // ---- Multi-currency wiring ----
@@ -121,7 +123,7 @@ export default function BudgetPage() {
   };
 
   const handleDelete = async (b: Budget) => {
-    if (!confirm(`Delete budget for "${b.category}"?`)) return;
+    if (!(await confirm({ title:'Delete budget?', message:`Delete budget for "${b.category}"?`, confirmLabel:'Delete', danger:true }))) return;
     try {
       const { error } = await sb.from('budget').delete().eq('id', b.id);
       if (error) throw error;

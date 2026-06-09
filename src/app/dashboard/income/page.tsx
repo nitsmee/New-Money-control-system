@@ -9,6 +9,7 @@ import { useDisplayCurrency } from '@/lib/useDisplayCurrency';
 import toast from 'react-hot-toast';
 import { Plus, Pencil, Trash2, X, Check } from 'lucide-react';
 import { MultiSelect } from '@/components/MultiSelect';
+import { useConfirm } from '@/components/ConfirmDialog';
 
 const COMMON_SOURCES = ['Salary', 'Freelance', 'Business', 'Rental', 'Dividend', 'Bonus', 'Gift', 'Reimbursement', 'Other'];
 
@@ -45,6 +46,7 @@ export default function IncomePage() {
   const [search, setSearch] = useState('');
 
   const sb = createClient();
+  const confirm = useConfirm();
   const sym = settings?.currency_symbol ?? '₹';
 
   // Multi-currency: each income row is in its to-account's currency. Rows show
@@ -168,7 +170,7 @@ export default function IncomePage() {
         // Run the sweep after the salary is recorded.
         if (leftover > 0 && savings) {
           const fromName = accounts.find(a => a.id === payload.to_account_id)?.name ?? 'your salary account';
-          const ok = confirm(`${fromName} still has ${formatCurrency(leftover, sym)} left over from before.\n\nMove it into "${savings.name}" so ${fromName} resets to just your new salary?`);
+          const ok = await confirm({ title: 'Move leftover to savings?', message: `${fromName} still has ${formatCurrency(leftover, sym)} left over from before.\n\nMove it into "${savings.name}" so ${fromName} resets to just your new salary?`, confirmLabel: 'Move', cancelLabel: 'Skip' });
           if (ok) {
             const sweepRow = {
               user_id: user.id,
@@ -199,7 +201,7 @@ export default function IncomePage() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Delete this income entry?')) return;
+    if (!(await confirm({ title: 'Delete income?', message: 'Delete this income entry?', confirmLabel: 'Delete', danger: true }))) return;
     setDeleting(id);
     try {
       const { error } = await sb.from('income').delete().eq('id', id);

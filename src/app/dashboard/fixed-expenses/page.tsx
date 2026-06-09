@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client';
 import { FixedExpense, FixedExpenseType } from '@/types';
 import { formatCurrency, getCurrentPeriod, nextDueDate, formatDate, calculateAccountBalances, currencySymbol } from '@/lib/utils/calculations';
 import { runAutoProcess } from '@/lib/utils/autoProcess';
+import { useConfirm } from '@/components/ConfirmDialog';
 import toast from 'react-hot-toast';
 import { Plus, Pencil, Trash2, X, Check, Play, AlertTriangle, Calendar, Zap } from 'lucide-react';
 
@@ -32,6 +33,7 @@ export default function FixedExpensesPage() {
   const [form, setForm] = useState<typeof EMPTY>({ ...EMPTY });
   const [saving, setSaving] = useState(false);
   const [processing, setProcessing] = useState<string | null>(null);
+  const confirm = useConfirm();
   const sb = createClient();
   const sym = settings?.currency_symbol ?? '₹';
   const base = settings?.currency ?? 'INR';
@@ -82,8 +84,12 @@ export default function FixedExpensesPage() {
         updateFixedExpense: state.updateFixedExpense,
         asOf: new Date(),
         confirmBatch: opts?.confirmLarge
-          ? ({ name, count, amount }) =>
-              window.confirm(`"${name}" has ${count} unposted past months. Create ${count} entries totalling ${formatCurrency(amount, sym)} now?`)
+          ? async ({ name, count, amount }) =>
+              await confirm({
+                title: 'Create past entries?',
+                message: `"${name}" has ${count} unposted past months. Create ${count} entries totalling ${formatCurrency(amount, sym)} now?`,
+                confirmLabel: `Create ${count}`,
+              })
           : undefined,
       });
       if (!opts?.silent) {
@@ -174,7 +180,7 @@ export default function FixedExpensesPage() {
   };
 
   const handleDelete = async (fe: FixedExpense) => {
-    if (!confirm(`Delete "${fe.name}"? Past transactions already created will remain.`)) return;
+    if (!(await confirm({ title: 'Delete fixed expense?', message: `Delete "${fe.name}"? Past transactions already created will remain.`, confirmLabel: 'Delete', danger: true }))) return;
     try {
       const { error } = await sb.from('fixed_expenses').delete().eq('id', fe.id);
       if (error) throw error;

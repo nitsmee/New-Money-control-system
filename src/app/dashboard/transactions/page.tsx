@@ -12,6 +12,7 @@ import { DuplicateWarning } from '@/components/DuplicateWarning';
 import { QuickAddModal } from '@/components/QuickAddModal';
 import { CSVImportModal } from '@/components/CSVImportModal';
 import { MultiSelect } from '@/components/MultiSelect';
+import { useConfirm } from '@/components/ConfirmDialog';
 import { isOnline, offlineQueue } from '@/lib/offline';
 
 const EMPTY = {
@@ -89,6 +90,7 @@ export default function TransactionsPage() {
   const [showQuickAdd, setShowQuickAdd] = useState(false);
 
   const sb = createClient();
+  const confirm = useConfirm();
   const sym = settings?.currency_symbol ?? '₹';
 
   // Multi-currency: each account holds amounts in its own currency. Row amounts
@@ -225,7 +227,7 @@ export default function TransactionsPage() {
 
   const handleBulkDelete = async () => {
     if (selectedIds.size === 0) return;
-    if (!confirm(`Move ${selectedIds.size} selected transaction(s) to the Recycle Bin? You can restore them later.`)) return;
+    if (!(await confirm({ title: 'Move to Recycle Bin?', message: `Move ${selectedIds.size} selected transaction(s) to the Recycle Bin? You can restore them later.`, confirmLabel: 'Move to bin' }))) return;
     setBulkDeleting(true);
     try {
       const ids = [...selectedIds];
@@ -372,7 +374,7 @@ export default function TransactionsPage() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Move this transaction to the Recycle Bin? You can restore it later.')) return;
+    if (!(await confirm({ title: 'Move to Recycle Bin?', message: 'Move this transaction to the Recycle Bin? You can restore it later.', confirmLabel: 'Move to bin' }))) return;
     setDeleting(id);
     try {
       const { error } = await sb.from('transactions').update({ deleted_at: new Date().toISOString() }).eq('id', id);

@@ -7,6 +7,7 @@ import { formatCurrency, safeDueDate, calculateAccountBalances, currencySymbol }
 import { runAutoProcessIncome } from '@/lib/utils/autoProcessIncome';
 import toast from 'react-hot-toast';
 import { Plus, Pencil, Trash2, X, Check, RefreshCw } from 'lucide-react';
+import { useConfirm } from '@/components/ConfirmDialog';
 
 let recurringIncomePageAutoRan = false;
 
@@ -68,6 +69,7 @@ export default function RecurringIncomePage() {
   const [deleting, setDeleting] = useState<string | null>(null);
 
   const sb = createClient();
+  const confirm = useConfirm();
   const sym = settings?.currency_symbol ?? '₹';
   const base = settings?.currency ?? 'INR';
   const rates = settings?.exchange_rates;
@@ -189,7 +191,7 @@ export default function RecurringIncomePage() {
   };
 
   const handleDelete = async (ri: RecurringIncome) => {
-    if (!confirm(`Delete "${ri.name}"? This cannot be undone.`)) return;
+    if (!(await confirm({ title:'Delete recurring income?', message:`Delete "${ri.name}"? This cannot be undone.`, confirmLabel:'Delete', danger:true }))) return;
     setDeleting(ri.id);
     try {
       const { error } = await sb.from('recurring_income').delete().eq('id', ri.id);

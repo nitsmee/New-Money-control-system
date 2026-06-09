@@ -6,6 +6,7 @@ import { Transaction, TransactionType } from '@/types';
 import { formatCurrency, formatDate, currencySymbol } from '@/lib/utils/calculations';
 import toast from 'react-hot-toast';
 import { Trash2, Undo2, Loader2 } from 'lucide-react';
+import { useConfirm } from '@/components/ConfirmDialog';
 
 // Per-type badge colours — mirrors the Transactions page so a row looks the
 // same wherever it appears.
@@ -44,6 +45,7 @@ export default function RecycleBinPage() {
   // Track per-row in-flight actions so buttons can show a spinner / disable.
   const [busyId, setBusyId] = useState<string | null>(null);
   const [emptying, setEmptying] = useState(false);
+  const confirm = useConfirm();
 
   const base = settings?.currency ?? 'INR';
 
@@ -92,7 +94,7 @@ export default function RecycleBinPage() {
   };
 
   const handleDeleteForever = async (tx: Transaction) => {
-    if (!confirm('Permanently delete this transaction? This cannot be undone.')) return;
+    if (!(await confirm({ title: 'Delete forever?', message: 'Permanently delete this transaction? This cannot be undone.', confirmLabel: 'Delete forever', danger: true }))) return;
     setBusyId(tx.id);
     try {
       const { error } = await createClient()
@@ -111,7 +113,7 @@ export default function RecycleBinPage() {
 
   const handleEmptyBin = async () => {
     if (recycledTransactions.length === 0) return;
-    if (!confirm(`Permanently delete all ${recycledTransactions.length} transaction(s)? This cannot be undone.`)) return;
+    if (!(await confirm({ title: 'Empty recycle bin?', message: `Permanently delete all ${recycledTransactions.length} transaction(s)? This cannot be undone.`, confirmLabel: 'Empty bin', danger: true }))) return;
     setEmptying(true);
     try {
       const ids = recycledTransactions.map(r => r.id);

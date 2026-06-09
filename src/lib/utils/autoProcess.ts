@@ -30,7 +30,7 @@ export interface RunAutoProcessParams {
   // Optional gate: asked before creating a large batch for ONE expense
   // (e.g. when you add an old fixed expense that back-fills many months).
   // Return false to skip creating that expense's entries.
-  confirmBatch?: (info: { name: string; count: number; amount: number }) => boolean;
+  confirmBatch?: (info: { name: string; count: number; amount: number }) => boolean | Promise<boolean>;
   // Limit processing to a single fixed expense (used right after adding one).
   onlyId?: string;
 }
@@ -67,7 +67,7 @@ export async function runAutoProcess(params: RunAutoProcessParams): Promise<Auto
 
     // Guard against a surprise large back-fill.
     if (params.confirmBatch && missing.length >= 4) {
-      const proceed = params.confirmBatch({
+      const proceed = await params.confirmBatch({
         name: fe.name,
         count: missing.length,
         amount: missing.length * fe.amount,
