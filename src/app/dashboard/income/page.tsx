@@ -1,15 +1,20 @@
 'use client';
 import { useState, useMemo } from 'react';
-import { format, endOfMonth } from 'date-fns';
+import { format, endOfMonth, startOfMonth, subMonths, startOfYear, endOfYear, subYears } from 'date-fns';
 import { useAppStore } from '@/lib/store/appStore';
 import { createClient } from '@/lib/supabase/client';
 import { Income } from '@/types';
-import { formatCurrency, calculateAccountBalances, accountRole, currencySymbol, convertAmount, runningBalanceByEntry, YEAR_OPTIONS } from '@/lib/utils/calculations';
+import { formatCurrency, calculateAccountBalances, accountRole, currencySymbol, convertAmount, runningBalanceByEntry } from '@/lib/utils/calculations';
 import { useDisplayCurrency } from '@/lib/useDisplayCurrency';
 import toast from 'react-hot-toast';
 import { Plus, Pencil, Trash2, X, Check } from 'lucide-react';
+import { MultiSelect } from '@/components/MultiSelect';
 
 const COMMON_SOURCES = ['Salary', 'Freelance', 'Business', 'Rental', 'Dividend', 'Bonus', 'Gift', 'Reimbursement', 'Other'];
+
+// Quick date-range presets. A custom From/To range covers everything else
+// (a single month, several months, a whole year, etc.).
+const DATE_PRESETS = ['This Month', 'Last Month', 'Last 3 Months', 'This Year', 'Last Year', 'All Time', 'Custom'];
 
 const EMPTY: Omit<Income, 'id' | 'user_id' | 'created_at' | 'updated_at'> = {
   date: new Date().toISOString().split('T')[0],
@@ -29,8 +34,15 @@ export default function IncomePage() {
   const [form, setForm] = useState({ ...EMPTY });
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
-  const [filterMonth, setFilterMonth] = useState(new Date().getMonth() + 1);
-  const [filterYear, setFilterYear] = useState(new Date().getFullYear());
+  const [fromDate, setFromDate] = useState(() => format(startOfMonth(new Date()), 'yyyy-MM-dd'));
+  const [toDate, setToDate] = useState(() => format(endOfMonth(new Date()), 'yyyy-MM-dd'));
+  const [datePreset, setDatePreset] = useState('This Month');
+  // Multi-select filters: empty array = no filter (all). These hold the SELECTED
+  // values; the dropdown OPTION lists live in the filter* memos below.
+  const [selCategories, setSelCategories] = useState<string[]>([]);
+  const [selSources, setSelSources] = useState<string[]>([]);
+  const [selOwners, setSelOwners] = useState<string[]>([]);
+  const [search, setSearch] = useState('');
 
   const sb = createClient();
   const sym = settings?.currency_symbol ?? '₹';
@@ -51,11 +63,42 @@ export default function IncomePage() {
   // FULL history (not just the filtered month) so the figures stay correct.
   const runningMap = useMemo(() => runningBalanceByEntry(accounts, income, transactions, rates, base), [accounts, income, transactions, rates, base]);
 
+  // Distinct values actually present in the income data — power the filter dropdowns.
+  const filterCategories = useMemo(() => Array.from(new Set(income.map(i => i.category).filter(Boolean) as string[])).sort(), [income]);
+  const filterSources = useMemo(() => Array.from(new Set(income.map(i => i.source).filter(Boolean) as string[])).sort(), [income]);
+  const filterOwners = useMemo(() => Array.from(new Set(income.map(i => i.owner_purpose).filter(Boolean) as string[])).sort(), [income]);
+
+  const hasActiveFilters = search.trim() !== '' || selCategories.length > 0 || selSources.length > 0 || selOwners.length > 0;
+  const clearFilters = () => { setSearch(''); setSelCategories([]); setSelSources([]); setSelOwners([]); };
+  // Apply a quick preset → fills the From/To range.
+  const applyDatePreset = (p: string) => {
+    setDatePreset(p);
+    const now = new Date();
+    const f = (d: Date) => format(d, 'yyyy-MM-dd');
+    if (p === 'This Month') { setFromDate(f(startOfMonth(now))); setToDate(f(endOfMonth(now))); }
+    else if (p === 'Last Month') { const d = subMonths(now, 1); setFromDate(f(startOfMonth(d))); setToDate(f(endOfMonth(d))); }
+    else if (p === 'Last 3 Months') { setFromDate(f(startOfMonth(subMonths(now, 2)))); setToDate(f(endOfMonth(now))); }
+    else if (p === 'This Year') { setFromDate(f(startOfYear(now))); setToDate(f(endOfYear(now))); }
+    else if (p === 'Last Year') { const d = subYears(now, 1); setFromDate(f(startOfYear(d))); setToDate(f(endOfYear(d))); }
+    else if (p === 'All Time') { setFromDate(''); setToDate(''); }
+    // 'Custom' keeps whatever From/To are currently set.
+  };
+
   const filtered = useMemo(() => {
-    const start = `${filterYear}-${String(filterMonth).padStart(2, '0')}-01`;
-    const end = format(endOfMonth(new Date(filterYear, filterMonth - 1)), 'yyyy-MM-dd');
-    return income.filter(i => i.date >= start && i.date <= end).sort((a, b) => b.date.localeCompare(a.date));
-  }, [income, filterMonth, filterYear]);
+    const q = search.trim().toLowerCase();
+    return income.filter(i => {
+      if (fromDate && i.date < fromDate) return false;
+      if (toDate && i.date > toDate) return false;
+      if (!(selCategories.length === 0 || selCategories.includes(i.category))) return false;
+      if (!(selSources.length === 0 || (i.source && selSources.includes(i.source)))) return false;
+      if (!(selOwners.length === 0 || selOwners.includes(i.owner_purpose))) return false;
+      if (q) {
+        const hay = `${i.source ?? ''} ${i.category ?? ''} ${i.description ?? ''} ${i.notes ?? ''} ${i.amount}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    }).sort((a, b) => b.date.localeCompare(a.date));
+  }, [income, fromDate, toDate, selCategories, selSources, selOwners, search]);
 
   // Income may land in accounts of different currencies, so convert each entry
   // into the display currency before summing. With a single currency (and/or no
@@ -170,8 +213,6 @@ export default function IncomePage() {
     }
   };
 
-  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-
   return (
     <div className="space-y-5">
       {/* Header */}
@@ -185,20 +226,49 @@ export default function IncomePage() {
         </button>
       </div>
 
-      {/* Filters & Summary */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <select className="form-select text-sm py-1.5 px-3 w-auto" value={filterMonth} onChange={e => setFilterMonth(+e.target.value)}>
-            {MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+      {/* Filters */}
+      <div className="card card-p space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            type="text" value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Search source, category, description, amount…"
+            className="form-input text-sm py-1.5 px-3 flex-1 min-w-[180px]"
+          />
+          <select className="form-select text-sm py-1.5 px-3 w-auto" value={datePreset} onChange={e => applyDatePreset(e.target.value)} title="Quick date range">
+            {DATE_PRESETS.map(p => <option key={p} value={p}>{p}</option>)}
           </select>
-          <select className="form-select text-sm py-1.5 px-3 w-auto" value={filterYear} onChange={e => setFilterYear(+e.target.value)}>
-            {YEAR_OPTIONS.map(y => <option key={y} value={y}>{y}</option>)}
-          </select>
+          <input type="date" className="form-input text-sm py-1.5 px-2 w-auto" value={fromDate} onChange={e => { setFromDate(e.target.value); setDatePreset('Custom'); }} title="From date" />
+          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>to</span>
+          <input type="date" className="form-input text-sm py-1.5 px-2 w-auto" value={toDate} onChange={e => { setToDate(e.target.value); setDatePreset('Custom'); }} title="To date" />
+          <MultiSelect
+            value={selCategories}
+            onChange={setSelCategories}
+            options={filterCategories.map(c => ({ value: c, label: c }))}
+            placeholder="All Categories"
+          />
+          <MultiSelect
+            value={selSources}
+            onChange={setSelSources}
+            options={filterSources.map(s => ({ value: s, label: s }))}
+            placeholder="All Sources"
+          />
+          <MultiSelect
+            value={selOwners}
+            onChange={setSelOwners}
+            options={filterOwners.map(o => ({ value: o, label: o }))}
+            placeholder="All Owners"
+          />
+          {hasActiveFilters && (
+            <button onClick={clearFilters} className="btn-md btn-secondary text-xs py-1.5 px-3">Clear filters</button>
+          )}
         </div>
-        <div className="flex items-center gap-4 text-sm">
-          <span style={{ color: 'var(--text-muted)' }}>Total: <strong className="amount-positive">{formatCurrency(totalIncome, currencySymbol(displayCur))}</strong></span>
-          <span style={{ color: 'var(--text-muted)' }}>True Income: <strong className="text-blue-600">{formatCurrency(trueIncome, currencySymbol(displayCur))}</strong></span>
-          <span className="text-xs opacity-70" style={{ color: 'var(--text-muted)' }}>(in {displayCur})</span>
+
+        {/* Summary of filtered results */}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs pt-2 border-t border-slate-100 dark:border-slate-700" style={{ color: 'var(--text-muted)' }}>
+          <span><strong style={{ color: 'var(--text-primary)' }}>{filtered.length}</strong> entr{filtered.length === 1 ? 'y' : 'ies'}</span>
+          <span>Total income: <strong className="amount-positive">{formatCurrency(totalIncome, currencySymbol(displayCur))}</strong></span>
+          <span>True income: <strong className="text-blue-600">{formatCurrency(trueIncome, currencySymbol(displayCur))}</strong></span>
+          <span className="opacity-70">(in {displayCur})</span>
         </div>
       </div>
 
@@ -289,7 +359,9 @@ export default function IncomePage() {
             <tbody>
               {filtered.length === 0 && (
                 <tr><td colSpan={9} className="text-center py-10 text-sm" style={{ color: 'var(--text-muted)' }}>
-                  No income entries for this period. Click "Add Income" to get started.
+                  {hasActiveFilters
+                    ? 'No income entries match your filters. Try clearing some.'
+                    : 'No income entries for this period. Click "Add Income" to get started.'}
                 </td></tr>
               )}
               {filtered.map(inc => {

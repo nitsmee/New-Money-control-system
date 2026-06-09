@@ -12,12 +12,48 @@ const SEVERITY_ICON = {
   info: Info,
   success: CheckCircle,
 };
-const SEVERITY_STYLE = {
-  error: 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-800 dark:text-red-300',
-  warning: 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300',
-  info: 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800 text-blue-800 dark:text-blue-300',
-  success: 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300',
+
+// Presentation-only style tokens per severity. Drive the colored left accent,
+// the tinted icon circle and the action button accents — no logic depends on these.
+type Severity = 'error' | 'warning' | 'info' | 'success';
+const SEVERITY_STYLE: Record<Severity, {
+  accent: string;      // left accent border color
+  iconWrap: string;    // tinted circle behind the icon
+  icon: string;        // icon color
+  action: string;      // action button accent
+}> = {
+  error: {
+    accent: 'border-l-red-500',
+    iconWrap: 'bg-red-100 dark:bg-red-900/30',
+    icon: 'text-red-600 dark:text-red-400',
+    action: 'text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/30 border-red-200 dark:border-red-800',
+  },
+  warning: {
+    accent: 'border-l-amber-500',
+    iconWrap: 'bg-amber-100 dark:bg-amber-900/30',
+    icon: 'text-amber-600 dark:text-amber-400',
+    action: 'text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-900/30 border-amber-200 dark:border-amber-800',
+  },
+  info: {
+    accent: 'border-l-blue-500',
+    iconWrap: 'bg-blue-100 dark:bg-blue-900/30',
+    icon: 'text-blue-600 dark:text-blue-400',
+    action: 'text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/30 border-blue-200 dark:border-blue-800',
+  },
+  success: {
+    accent: 'border-l-emerald-500',
+    iconWrap: 'bg-emerald-100 dark:bg-emerald-900/30',
+    icon: 'text-emerald-600 dark:text-emerald-400',
+    action: 'text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 border-emerald-200 dark:border-emerald-800',
+  },
 };
+
+// Section metadata for the grouped severity sections (label + matching list).
+const SECTION_META: { key: Severity; label: string }[] = [
+  { key: 'error', label: 'Critical' },
+  { key: 'warning', label: 'Warnings' },
+  { key: 'info', label: 'Info' },
+];
 
 const DISMISSED_KEY = 'mcs_dismissed_alerts';
 const SNOOZE_MS = 86400000; // 24h
@@ -149,91 +185,160 @@ export default function AlertsPage() {
   const errors = visibleAlerts.filter(a => a.severity === 'error');
   const warnings = visibleAlerts.filter(a => a.severity === 'warning');
   const infos = visibleAlerts.filter(a => a.severity === 'info');
+  const bySeverity: Record<Severity, typeof visibleAlerts> = {
+    error: errors,
+    warning: warnings,
+    info: infos,
+    success: visibleAlerts.filter(a => a.severity === 'success'),
+  };
+
+  // Presentation-only summary chips. Counts come straight from the lists above.
+  const summaryChips = [
+    { label: 'Critical', count: errors.length, style: SEVERITY_STYLE.error, Icon: XCircle },
+    { label: 'Warnings', count: warnings.length, style: SEVERITY_STYLE.warning, Icon: AlertTriangle },
+    { label: 'Info', count: infos.length, style: SEVERITY_STYLE.info, Icon: Info },
+  ];
+
+  // Single source of truth for rendering an alert card (used in every section).
+  const renderAlert = (alert: typeof visibleAlerts[number]) => {
+    const Icon = SEVERITY_ICON[alert.severity];
+    const s = SEVERITY_STYLE[alert.severity];
+    return (
+      <div
+        key={alert.id}
+        className={`card border-l-4 ${s.accent} p-4 flex items-start gap-3.5 transition-all`}
+      >
+        <div className={`flex-shrink-0 w-10 h-10 rounded-full grid place-items-center ${s.iconWrap}`}>
+          <Icon size={20} className={s.icon}/>
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="font-semibold text-sm" style={{ color:'var(--text-primary)' }}>{alert.title}</p>
+          <p className="text-sm mt-0.5" style={{ color:'var(--text-secondary)' }}>{alert.message}</p>
+        </div>
+        <div className="flex-shrink-0 flex items-center gap-1.5 self-start">
+          {alert.actionable && alert.action_link && (
+            <Link
+              href={alert.action_link}
+              className={`hidden sm:inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${s.action}`}
+            >
+              {alert.action_label ?? 'Take Action'}
+              <span aria-hidden>→</span>
+            </Link>
+          )}
+          <button
+            onClick={() => dismissAlert(alert.id)}
+            aria-label="Dismiss alert"
+            className="p-1.5 rounded-lg opacity-50 hover:opacity-100 hover:bg-black/5 dark:hover:bg-white/10 transition-all"
+          >
+            <X size={16}/>
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  // Mobile-only action link row (kept out of the flex header so cards stay tidy
+  // on narrow screens). Same link/logic as the inline button above.
+  const renderMobileAction = (alert: typeof visibleAlerts[number]) => {
+    if (!alert.actionable || !alert.action_link) return null;
+    const s = SEVERITY_STYLE[alert.severity];
+    return (
+      <Link
+        href={alert.action_link}
+        className={`sm:hidden inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${s.action}`}
+      >
+        {alert.action_label ?? 'Take Action'}
+        <span aria-hidden>→</span>
+      </Link>
+    );
+  };
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <div className="page-header">
         <div>
           <h1 className="page-title">Alerts</h1>
-          <p className="text-sm" style={{ color:'var(--text-secondary)' }}>Real-time financial health checks and warnings</p>
+          <p className="text-sm mt-0.5" style={{ color:'var(--text-secondary)' }}>Real-time financial health checks and warnings</p>
         </div>
         <div className="flex items-center gap-2">
-          {errors.length > 0 && <span className="badge badge-red">{errors.length} critical</span>}
-          {warnings.length > 0 && <span className="badge badge-yellow">{warnings.length} warnings</span>}
-          {allAlerts.length === 0 && <span className="badge badge-green">All clear ✓</span>}
+          {errors.length > 0 && <span className="badge badge-red"><XCircle size={12}/> {errors.length} critical</span>}
+          {warnings.length > 0 && <span className="badge badge-yellow"><AlertTriangle size={12}/> {warnings.length} warnings</span>}
+          {allAlerts.length === 0 && <span className="badge badge-green"><CheckCircle size={12}/> All clear</span>}
         </div>
       </div>
 
       {allAlerts.length === 0 && (
-        <div className="card card-p text-center py-16">
-          <CheckCircle size={48} className="mx-auto mb-4 text-emerald-400"/>
-          <h2 className="text-xl font-bold mb-2 text-emerald-600">All Clear!</h2>
-          <p className="text-sm" style={{ color:'var(--text-muted)' }}>No alerts at this time. Your finances are looking healthy.</p>
+        <div className="card card-p text-center py-16 animate-fade-in-up">
+          <div className="mx-auto mb-5 w-20 h-20 rounded-full grid place-items-center bg-emerald-100 dark:bg-emerald-900/30">
+            <CheckCircle size={40} className="text-emerald-600 dark:text-emerald-400"/>
+          </div>
+          <h2 className="text-xl font-bold mb-2" style={{ color:'var(--text-primary)' }}>All Clear!</h2>
+          <p className="text-sm max-w-sm mx-auto" style={{ color:'var(--text-muted)' }}>No alerts at this time. Your finances are looking healthy — keep it up.</p>
         </div>
       )}
 
       {hasSnoozed && (
-        <div className="card card-p text-center py-16">
-          <Bell size={48} className="mx-auto mb-4 text-blue-400"/>
-          <h2 className="text-xl font-bold mb-2 text-blue-600">All alerts snoozed for 24h</h2>
-          <p className="text-sm mb-4" style={{ color:'var(--text-muted)' }}>You&apos;ve dismissed every active alert. They&apos;ll reappear automatically after 24 hours.</p>
-          <button onClick={showAllAlerts} className="btn btn-sm btn-secondary">Show all</button>
+        <div className="card card-p text-center py-16 animate-fade-in-up">
+          <div className="mx-auto mb-5 w-20 h-20 rounded-full grid place-items-center bg-blue-100 dark:bg-blue-900/30">
+            <Bell size={36} className="text-blue-600 dark:text-blue-400"/>
+          </div>
+          <h2 className="text-xl font-bold mb-2" style={{ color:'var(--text-primary)' }}>All alerts snoozed for 24h</h2>
+          <p className="text-sm mb-5 max-w-sm mx-auto" style={{ color:'var(--text-muted)' }}>You&apos;ve dismissed every active alert. They&apos;ll reappear automatically after 24 hours.</p>
+          <button onClick={showAllAlerts} className="btn btn-sm btn-secondary mx-auto">Show all</button>
         </div>
       )}
 
-      {/* Summary Row */}
+      {/* Summary Chips */}
       {visibleAlerts.length > 0 && (
         <div className="grid grid-cols-3 gap-3">
-          {[
-            { label:'Critical', count:errors.length, color:'text-red-500', bg:'bg-red-50 dark:bg-red-900/20', Icon:XCircle },
-            { label:'Warnings', count:warnings.length, color:'text-amber-600', bg:'bg-amber-50 dark:bg-amber-900/20', Icon:AlertTriangle },
-            { label:'Info', count:infos.length, color:'text-blue-600', bg:'bg-blue-50 dark:bg-blue-900/20', Icon:Info },
-          ].map(item => (
-            <div key={item.label} className={`card card-p ${item.bg}`}>
-              <div className="flex items-center gap-2">
-                <item.Icon size={18} className={item.color}/>
-                <span className="text-sm font-medium" style={{ color:'var(--text-secondary)' }}>{item.label}</span>
+          {summaryChips.map(item => (
+            <div key={item.label} className="card card-p flex items-center gap-3">
+              <div className={`flex-shrink-0 w-11 h-11 rounded-full grid place-items-center ${item.style.iconWrap}`}>
+                <item.Icon size={20} className={item.style.icon}/>
               </div>
-              <p className={`text-2xl font-bold mt-1 ${item.color}`}>{item.count}</p>
+              <div className="min-w-0">
+                <p className="kpi-label">{item.label}</p>
+                <p className={`text-2xl font-bold leading-none mt-1 ${item.style.icon}`}>{item.count}</p>
+              </div>
             </div>
           ))}
         </div>
       )}
 
-      {/* Alert List */}
-      <div className="space-y-3">
-        {visibleAlerts.map(alert => {
-          const Icon = SEVERITY_ICON[alert.severity];
-          return (
-            <div key={alert.id} className={`card border p-4 ${SEVERITY_STYLE[alert.severity]}`}>
-              <div className="flex items-start gap-3">
-                <Icon size={18} className="flex-shrink-0 mt-0.5"/>
-                <div className="flex-1">
-                  <p className="font-semibold text-sm">{alert.title}</p>
-                  <p className="text-sm mt-0.5 opacity-80">{alert.message}</p>
-                  {alert.actionable && alert.action_link && (
-                    <Link href={alert.action_link} className="inline-block mt-2 text-xs font-medium underline underline-offset-2 opacity-80 hover:opacity-100">
-                      {alert.action_label ?? 'Take Action'} →
-                    </Link>
-                  )}
+      {/* Grouped Alert Sections (Critical → Warnings → Info) */}
+      {visibleAlerts.length > 0 && (
+        <div className="space-y-6">
+          {SECTION_META.map(({ key, label }) => {
+            const list = bySeverity[key];
+            if (list.length === 0) return null;
+            const s = SEVERITY_STYLE[key];
+            return (
+              <section key={key} className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <h2 className={`text-sm font-semibold uppercase tracking-wider ${s.icon}`}>{label}</h2>
+                  <span className="badge badge-gray">{list.length}</span>
                 </div>
-                <button
-                  onClick={() => dismissAlert(alert.id)}
-                  aria-label="Dismiss alert"
-                  className="flex-shrink-0 -mt-1 -mr-1 p-1 rounded opacity-50 hover:opacity-100 hover:bg-black/5 dark:hover:bg-white/10 transition-opacity"
-                >
-                  <X size={16}/>
-                </button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+                <div className="space-y-3">
+                  {list.map(alert => (
+                    <div key={alert.id} className="space-y-2">
+                      {renderAlert(alert)}
+                      {renderMobileAction(alert)}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            );
+          })}
+        </div>
+      )}
 
       {/* Financial Health Checklist */}
       <div className="card card-p">
-        <h3 className="section-title text-base mb-4">Financial Health Checklist</h3>
-        <div className="space-y-3">
+        <div className="flex items-center gap-2 mb-4">
+          <Shield size={18} style={{ color:'var(--text-secondary)' }}/>
+          <h3 className="section-title text-base">Financial Health Checklist</h3>
+        </div>
+        <div className="divide-y divide-slate-100 dark:divide-slate-700/60">
           {[
             { label:'All accounts have initial balances set', check: accounts.length > 0 && transactions.some(t => t.type==='initial_balance'), link:'/dashboard/transactions' },
             { label:'Budgets set for all expense categories', check: budgets.length > 0, link:'/dashboard/budget' },
@@ -242,13 +347,13 @@ export default function AlertsPage() {
             { label:'No credit cards with very high outstanding (>₹50K)', check: !balances.some(b => b.is_credit_card && (b.outstanding??0) > 50000), link:'/dashboard/transactions' },
             { label:'Goals configured for future planning', check: true, link:'/dashboard/goals' },
           ].map((item, i) => (
-            <div key={i} className="flex items-center gap-3 py-1.5">
+            <div key={i} className="flex items-center gap-3 py-2.5">
               {item.check
-                ? <CheckCircle size={16} className="text-emerald-500 flex-shrink-0"/>
-                : <XCircle size={16} className="text-red-400 flex-shrink-0"/>}
-              <span className={`text-sm flex-1 ${item.check ? '' : 'text-red-600 dark:text-red-400'}`}>{item.label}</span>
+                ? <span className="flex-shrink-0 w-6 h-6 rounded-full grid place-items-center bg-emerald-100 dark:bg-emerald-900/30"><CheckCircle size={14} className="text-emerald-600 dark:text-emerald-400"/></span>
+                : <span className="flex-shrink-0 w-6 h-6 rounded-full grid place-items-center bg-red-100 dark:bg-red-900/30"><XCircle size={14} className="text-red-600 dark:text-red-400"/></span>}
+              <span className={`text-sm flex-1 ${item.check ? '' : 'font-medium text-red-600 dark:text-red-400'}`} style={item.check ? { color:'var(--text-secondary)' } : undefined}>{item.label}</span>
               {!item.check && (
-                <Link href={item.link} className="text-xs text-blue-600 hover:underline flex-shrink-0">Fix →</Link>
+                <Link href={item.link} className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline flex-shrink-0">Fix →</Link>
               )}
             </div>
           ))}

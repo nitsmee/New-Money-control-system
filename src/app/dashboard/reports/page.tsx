@@ -1,5 +1,5 @@
 'use client';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, type ReactNode } from 'react';
 import { useAppStore } from '@/lib/store/appStore';
 import { calculateAccountBalances, calculateBudgetStatus, getCategorySpend, formatCurrency, accountRole, currencySymbol, normalizeAmounts, YEAR_OPTIONS } from '@/lib/utils/calculations';
 import { useDisplayCurrency } from '@/lib/useDisplayCurrency';
@@ -149,13 +149,40 @@ export default function ReportsPage() {
     toast.success('Report exported');
   };
 
-  const StatRow = ({ label, value, sub, color='text-slate-700 dark:text-slate-200' }: any) => (
+  const StatRow = ({ label, value, sub, color='text-slate-700 dark:text-slate-200' }: {
+    label: string; value: number; sub?: string; color?: string;
+  }) => (
     <div className="flex items-center justify-between py-2.5 border-b border-slate-100 dark:border-slate-700 last:border-0">
       <span className="text-sm" style={{ color:'var(--text-secondary)' }}>{label}</span>
       <div className="text-right">
         <span className={`text-sm font-semibold ${color}`}>{formatCurrency(value, sym)}</span>
         {sub && <p className="text-xs" style={{ color:'var(--text-muted)' }}>{sub}</p>}
       </div>
+    </div>
+  );
+
+  // Presentation-only accent KPI card used by the yearly/custom stat grids.
+  // accent = tailwind text-color class for the value + a matching tinted icon.
+  const StatCard = ({ label, value, accent, iconWrap, Icon }: {
+    label: string; value: number; accent: string; iconWrap: string;
+    Icon: typeof TrendingUp;
+  }) => (
+    <div className="card card-p flex flex-col gap-2">
+      <div className="flex items-center justify-between">
+        <p className="kpi-label">{label}</p>
+        <span className={`flex-shrink-0 w-8 h-8 rounded-lg grid place-items-center ${iconWrap}`}>
+          <Icon size={16} className={accent}/>
+        </span>
+      </div>
+      <p className={`kpi-value ${accent}`}>{formatCurrency(value, sym)}</p>
+    </div>
+  );
+
+  // Consistent chart-card header: title on the left, optional control on the right.
+  const CardHeader = ({ title, children }: { title: string; children?: ReactNode }) => (
+    <div className="flex items-center justify-between gap-3 mb-4">
+      <h3 className="section-title text-base">{title}</h3>
+      {children}
     </div>
   );
 
@@ -171,10 +198,14 @@ export default function ReportsPage() {
         <button onClick={exportCSV} className="btn-md btn-secondary"><Download size={16}/> Export CSV</button>
       </div>
 
-      {/* Tab Switcher */}
-      <div className="flex gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl w-fit">
+      {/* Tab Switcher — segmented control */}
+      <div className="inline-flex gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200 dark:border-slate-700">
         {(['monthly','yearly','custom'] as const).map(t => (
-          <button key={t} onClick={() => setTab(t)} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${tab===t ? 'bg-white dark:bg-slate-700 shadow-sm text-blue-600 dark:text-blue-400' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}>
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`px-5 py-2 rounded-lg text-sm font-medium transition-all ${tab===t ? 'bg-white dark:bg-slate-700 shadow-sm text-blue-600 dark:text-blue-400' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+          >
             {t.charAt(0).toUpperCase()+t.slice(1)}
           </button>
         ))}
@@ -195,7 +226,7 @@ export default function ReportsPage() {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             {/* Summary */}
             <div className="card card-p">
-              <h3 className="section-title text-base mb-3">P&L Summary — {MONTHS[selMonth-1]} {selYear}</h3>
+              <CardHeader title={`P&L Summary — ${MONTHS[selMonth-1]} ${selYear}`} />
               <StatRow label="Total Income" value={monthlyStats.totalIncome} color="text-emerald-600 dark:text-emerald-400" />
               <StatRow label="True Income" value={monthlyStats.trueIncome} sub="Excl. family/reimbursements" color="text-emerald-600 dark:text-emerald-400" />
               <StatRow label="Total Expense" value={monthlyStats.totalExpense} color="text-red-500" />
@@ -210,7 +241,7 @@ export default function ReportsPage() {
 
             {/* Category Pie */}
             <div className="card card-p">
-              <h3 className="section-title text-base mb-3">Expense by Category</h3>
+              <CardHeader title="Expense by Category" />
               {monthCatSpend.length === 0
                 ? <p className="text-sm text-center py-8" style={{ color:'var(--text-muted)' }}>No expenses this month</p>
                 : <>
@@ -238,7 +269,7 @@ export default function ReportsPage() {
 
             {/* Budget Variance */}
             <div className="card card-p">
-              <h3 className="section-title text-base mb-3">Budget Variance</h3>
+              <CardHeader title="Budget Variance" />
               <div className="space-y-2 max-h-72 overflow-y-auto">
                 {budgetStatuses.length===0 && <p className="text-sm text-center py-4" style={{ color:'var(--text-muted)' }}>No budgets set</p>}
                 {budgetStatuses.map(bs => (
@@ -256,7 +287,7 @@ export default function ReportsPage() {
 
           {/* Closing Balances */}
           <div className="card card-p">
-            <h3 className="section-title text-base mb-3">Closing Balances (All Time)</h3>
+            <CardHeader title="Closing Balances (All Time)" />
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
               {balances.filter(b => b.account.is_active && b.account.include_in_dashboard).map(b => {
                 // Native-currency display — each account in its own currency, not converted.
@@ -285,30 +316,26 @@ export default function ReportsPage() {
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
             {[
-              { label:'Total Income', value:yearlyStats.totalIncome, color:'text-emerald-600' },
-              { label:'Total Expense', value:yearlyStats.totalExpense, color:'text-red-500' },
-              { label:'Total Savings', value:yearlyStats.totalSavings, color:'text-blue-600' },
-              { label:'CC Bills Paid', value:yearlyStats.ccBills, color:'text-indigo-600' },
-              { label:'Family Expense', value:yearlyStats.familyExpense, color:'text-amber-600' },
+              { label:'Total Income', value:yearlyStats.totalIncome, accent:'text-emerald-600 dark:text-emerald-400', iconWrap:'bg-emerald-100 dark:bg-emerald-900/30', Icon:TrendingUp },
+              { label:'Total Expense', value:yearlyStats.totalExpense, accent:'text-red-500 dark:text-red-400', iconWrap:'bg-red-100 dark:bg-red-900/30', Icon:TrendingDown },
+              { label:'Total Savings', value:yearlyStats.totalSavings, accent:'text-blue-600 dark:text-blue-400', iconWrap:'bg-blue-100 dark:bg-blue-900/30', Icon:Wallet },
+              { label:'CC Bills Paid', value:yearlyStats.ccBills, accent:'text-indigo-600 dark:text-indigo-400', iconWrap:'bg-indigo-100 dark:bg-indigo-900/30', Icon:Calendar },
+              { label:'Family Expense', value:yearlyStats.familyExpense, accent:'text-amber-600 dark:text-amber-400', iconWrap:'bg-amber-100 dark:bg-amber-900/30', Icon:Wallet },
             ].map(item => (
-              <div key={item.label} className="card card-p">
-                <p className="kpi-label">{item.label}</p>
-                <p className={`kpi-value mt-1 ${item.color}`}>{formatCurrency(item.value, sym)}</p>
-              </div>
+              <StatCard key={item.label} label={item.label} value={item.value} accent={item.accent} iconWrap={item.iconWrap} Icon={item.Icon}/>
             ))}
           </div>
 
           {/* Category Trend Chart */}
           <div className="card card-p">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="section-title text-base">Category Spend Trend</h3>
+            <CardHeader title="Category Spend Trend">
               <select className="form-select text-sm py-1.5 px-3 w-auto" value={trendCategory} onChange={e => setTrendCategory(e.target.value)}>
                 <option value="">Select category…</option>
                 {Array.from(new Set(transactions.filter(t => t.type==='expense' && t.category).map(t => t.category!))).sort().map(c => (
                   <option key={c} value={c}>{c}</option>
                 ))}
               </select>
-            </div>
+            </CardHeader>
             {!trendCategory ? (
               <p className="text-sm text-center py-6" style={{ color: 'var(--text-muted)' }}>Select a category above to see its 12-month spend trend</p>
             ) : (
@@ -327,7 +354,7 @@ export default function ReportsPage() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {/* Monthly Trend Chart */}
             <div className="card card-p">
-              <h3 className="section-title text-base mb-4">Monthly Trend — {selYear}</h3>
+              <CardHeader title={`Monthly Trend — ${selYear}`} />
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={trends} margin={{ top:5,right:10,left:0,bottom:0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border-default)" vertical={false}/>
@@ -348,7 +375,7 @@ export default function ReportsPage() {
 
             {/* Annual Category Pie */}
             <div className="card card-p">
-              <h3 className="section-title text-base mb-4">Annual Category Spend — {selYear}</h3>
+              <CardHeader title={`Annual Category Spend — ${selYear}`} />
               {yearlyCatSpend.length===0
                 ? <p className="text-sm text-center py-8" style={{ color:'var(--text-muted)' }}>No data for {selYear}</p>
                 : <><ResponsiveContainer width="100%" height={180}>
@@ -392,16 +419,13 @@ export default function ReportsPage() {
 
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
             {[
-              { label:'Income', value:customStats.totalIncome, color:'text-emerald-600' },
-              { label:'Expense', value:customStats.totalExpense, color:'text-red-500' },
-              { label:'Savings', value:customStats.totalSavings, color:'text-blue-600' },
-              { label:'CC Bills', value:customStats.ccBills, color:'text-indigo-600' },
-              { label:'Net Cashflow', value:customStats.netCashflow, color:customStats.netCashflow>=0?'text-emerald-600':'text-red-500' },
+              { label:'Income', value:customStats.totalIncome, accent:'text-emerald-600 dark:text-emerald-400', iconWrap:'bg-emerald-100 dark:bg-emerald-900/30', Icon:TrendingUp },
+              { label:'Expense', value:customStats.totalExpense, accent:'text-red-500 dark:text-red-400', iconWrap:'bg-red-100 dark:bg-red-900/30', Icon:TrendingDown },
+              { label:'Savings', value:customStats.totalSavings, accent:'text-blue-600 dark:text-blue-400', iconWrap:'bg-blue-100 dark:bg-blue-900/30', Icon:Wallet },
+              { label:'CC Bills', value:customStats.ccBills, accent:'text-indigo-600 dark:text-indigo-400', iconWrap:'bg-indigo-100 dark:bg-indigo-900/30', Icon:Calendar },
+              { label:'Net Cashflow', value:customStats.netCashflow, accent:customStats.netCashflow>=0?'text-emerald-600 dark:text-emerald-400':'text-red-500 dark:text-red-400', iconWrap:customStats.netCashflow>=0?'bg-emerald-100 dark:bg-emerald-900/30':'bg-red-100 dark:bg-red-900/30', Icon:Wallet },
             ].map(item => (
-              <div key={item.label} className="card card-p">
-                <p className="kpi-label">{item.label}</p>
-                <p className={`kpi-value mt-1 ${item.color}`}>{formatCurrency(item.value, sym)}</p>
-              </div>
+              <StatCard key={item.label} label={item.label} value={item.value} accent={item.accent} iconWrap={item.iconWrap} Icon={item.Icon}/>
             ))}
           </div>
 

@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client';
 import { Transaction } from '@/types';
 import { calculateAccountBalances, accountRole, formatCurrency, formatDate, accountLedger, currencySymbol } from '@/lib/utils/calculations';
 import toast from 'react-hot-toast';
-import { Plus, X, Check, ArrowDownLeft, ArrowUpRight, Wallet, PiggyBank, TrendingUp, Users, CreditCard } from 'lucide-react';
+import { Plus, X, Check, Receipt, Wallet, PiggyBank, TrendingUp, Users, CreditCard } from 'lucide-react';
 
 type QAType = 'expense' | 'transfer' | 'saving';
 
@@ -23,7 +23,7 @@ export default function AccountsPage() {
   const sym = settings?.currency_symbol ?? '₹';
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [drawerView, setDrawerView] = useState<'recent' | 'statement'>('recent');
+  const [drawerView, setDrawerView] = useState<'statement' | 'quickadd'>('statement');
   const [qa, setQa] = useState({
     type: 'expense' as QAType,
     date: new Date().toISOString().split('T')[0],
@@ -52,13 +52,6 @@ export default function AccountsPage() {
 
   const selected = selectedId ? balOf(selectedId) : null;
   const selectedAccount = selected?.account ?? null;
-  const selectedTx = useMemo(() => {
-    if (!selectedId) return [];
-    return transactions
-      .filter(t => t.from_account_id === selectedId || t.to_account_id === selectedId)
-      .sort((a, b) => b.date.localeCompare(a.date))
-      .slice(0, 30);
-  }, [transactions, selectedId]);
 
   // Full running-balance statement for the selected account (native currency, oldest → newest).
   const ledger = useMemo(
@@ -68,7 +61,7 @@ export default function AccountsPage() {
 
   const openAccount = (id: string) => {
     setSelectedId(id);
-    setDrawerView('recent');
+    setDrawerView('statement');
     setQa({
       type: 'expense',
       date: new Date().toISOString().split('T')[0],
@@ -189,9 +182,31 @@ export default function AccountsPage() {
               <button onClick={() => setSelectedId(null)} className="btn-icon"><X size={18} /></button>
             </div>
 
-            {/* Quick add */}
-            <div className="p-5 border-b border-slate-100 dark:border-slate-700 space-y-3">
-              <p className="text-sm font-semibold flex items-center gap-1.5"><Plus size={15} /> Quick add</p>
+            {/* View toggle: Statement | Quick Add */}
+            <div className="p-5 pb-0">
+              <div className="inline-flex w-full p-1 rounded-xl gap-1" style={{ background: 'var(--bg-subtle, rgba(125,125,125,0.12))' }}>
+                {([
+                  { id: 'statement', label: 'Statement', Icon: Receipt },
+                  { id: 'quickadd', label: 'Quick Add', Icon: Plus },
+                ] as const).map(v => {
+                  const VIcon = v.Icon;
+                  const active = drawerView === v.id;
+                  return (
+                    <button
+                      key={v.id}
+                      onClick={() => setDrawerView(v.id)}
+                      className={`flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold transition-colors ${active ? 'bg-blue-600 text-white shadow-sm' : 'text-[color:var(--text-secondary)] hover:text-[color:var(--text-primary)]'}`}
+                    >
+                      <VIcon size={15} /> {v.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {drawerView === 'quickadd' ? (
+            /* Quick add */
+            <div className="p-5 space-y-3">
               <div className="flex gap-2">
                 {(['expense', 'transfer', 'saving'] as QAType[]).map(t => (
                   <button
@@ -252,50 +267,10 @@ export default function AccountsPage() {
                 {saving ? 'Saving…' : `Add ${qa.type}`}
               </button>
             </div>
-
-            {/* Recent vs full Statement */}
+            ) : (
+            /* Full running-balance Statement */
             <div className="p-5">
-              <div className="flex gap-2 mb-3">
-                {(['recent', 'statement'] as const).map(v => (
-                  <button
-                    key={v}
-                    onClick={() => setDrawerView(v)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${drawerView === v ? 'bg-blue-600 text-white border-blue-600' : 'border-slate-200 dark:border-slate-700'}`}
-                  >
-                    {v === 'recent' ? 'Recent' : 'Statement'}
-                  </button>
-                ))}
-              </div>
-
-              {drawerView === 'recent' ? (
-                <>
-                  {selectedTx.length === 0 && (
-                    <p className="text-sm" style={{ color: 'var(--text-muted)' }}>No transactions for this account yet.</p>
-                  )}
-                  <div className="space-y-2">
-                    {selectedTx.map(t => {
-                      const outflow = t.from_account_id === selectedId;
-                      return (
-                        <div key={t.id} className="flex items-center justify-between gap-2 py-1.5 border-b border-slate-50 dark:border-slate-800 last:border-0">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span className="inline-flex items-center justify-center w-6 h-6 rounded-full flex-shrink-0" style={{ background: 'var(--bg-subtle, rgba(125,125,125,0.12))' }}>
-                              {outflow ? <ArrowUpRight size={13} style={{ color: 'var(--text-danger)' }} /> : <ArrowDownLeft size={13} style={{ color: 'var(--text-success)' }} />}
-                            </span>
-                            <div className="min-w-0">
-                              <p className="text-sm truncate">{t.description || t.category || t.type}</p>
-                              <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{formatDate(t.date)}{t.category ? ` · ${t.category}` : ''}</p>
-                            </div>
-                          </div>
-                          <span className="text-sm font-semibold flex-shrink-0" style={{ color: outflow ? 'var(--text-danger)' : 'var(--text-success)' }}>
-                            {outflow ? '−' : '+'}{formatCurrency(t.amount, sym)}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </>
-              ) : (
-                (() => {
+              {(() => {
                   const base = settings?.currency ?? 'INR';
                   const accSym = currencySymbol(selectedAccount?.currency || base);
                   const isCC = !!selected.is_credit_card;
@@ -360,9 +335,9 @@ export default function AccountsPage() {
                       )}
                     </>
                   );
-                })()
-              )}
+                })()}
             </div>
+            )}
           </div>
         </div>
       )}

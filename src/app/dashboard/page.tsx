@@ -16,13 +16,36 @@ import {
   AreaChart, Area, PieChart, Pie, Cell, XAxis, YAxis,
   CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts';
-import { Wallet, CreditCard, AlertTriangle, Info, X, ArrowRight, ArrowDownToLine } from 'lucide-react';
+import { Wallet, CreditCard, AlertTriangle, Info, X, ArrowRight, ArrowDownToLine, CalendarRange, PiggyBank, TrendingUp, Landmark, Banknote, Percent } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
+import { format, startOfMonth, endOfMonth, subMonths, startOfYear, endOfYear, subYears } from 'date-fns';
 import Link from 'next/link';
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 // Shared year list for the selector — runs through 2060.
 const YEARS = YEAR_OPTIONS;
+
+// Quick date-range presets for the dashboard period control. "This Month" and
+// "Last Month" stay MONTHLY (so month-bound widgets + MoM chips keep working);
+// the range presets and "Custom" drive a custom from/to window.
+const DATE_PRESETS = ['This Month', 'Last Month', 'Last 3 Months', 'This Year', 'Last Year', 'Custom'] as const;
+type DatePreset = typeof DATE_PRESETS[number];
+const MONTHLY_PRESETS: DatePreset[] = ['This Month', 'Last Month'];
+
+// Subtle accent icon + tint per KPI card (visual polish — purely decorative).
+const CARD_ACCENT: Record<string, { icon: LucideIcon; color: string }> = {
+  'Safe to spend': { icon: Banknote, color: '#10b981' },
+  'Spendable': { icon: Wallet, color: '#3b82f6' },
+  'Savings': { icon: PiggyBank, color: '#6366f1' },
+  'Investments': { icon: TrendingUp, color: '#8b5cf6' },
+  'CC outstanding': { icon: CreditCard, color: '#ef4444' },
+  'Net cashflow': { icon: ArrowRight, color: '#0ea5e9' },
+  'Income this month': { icon: Landmark, color: '#22c55e' },
+  'Upcoming fixed': { icon: CalendarRange, color: '#f59e0b' },
+  'Ready to sweep': { icon: ArrowDownToLine, color: '#3b82f6' },
+  'Swept to savings': { icon: ArrowDownToLine, color: '#3b82f6' },
+};
 
 // Smooth count-up for the headline numbers.
 function useCountUp(target: number, duration = 650) {
@@ -76,11 +99,96 @@ export default function DashboardPage() {
   const { accounts, income, transactions, fixedExpenses, budgets, goals, categories, settings, dateFilter, setDateFilter, isLoading, recurringIncome } = useAppStore();
 
   const now = new Date();
+  const fmt = (d: Date) => format(d, 'yyyy-MM-dd');
   const [selMonth, setSelMonth] = useState(dateFilter.month ?? now.getMonth() + 1);
   const [selYear, setSelYear] = useState(dateFilter.year ?? now.getFullYear());
   const [detail, setDetail] = useState<DetailData | null>(null);
-  const filter = { ...dateFilter, month: selMonth, year: selYear };
-  const period = `${selYear}-${String(selMonth).padStart(2, '0')}`;
+
+  // ---- Flexible period selector ----
+  // The dashboard can show ANY time period. Two modes:
+  //  • MONTHLY (This Month / Last Month) — keeps the classic month-bound view:
+  //    sets selMonth/selYear, uses a { view:'monthly' } filter, and the
+  //    month-bound widgets + MoM chips behave exactly as before.
+  //  • CUSTOM/RANGE (Last 3 Months / This/Last Year / Custom) — drives a
+  //    { view:'custom', start_date, end_date } filter for the period totals and
+  //    the category-spend pie; month-bound widgets fall back to the real "now".
+  const [datePreset, setDatePreset] = useState<DatePreset>('This Month');
+  const [fromDate, setFromDate] = useState(() => fmt(startOfMonth(now)));
+  const [toDate, setToDate] = useState(() => fmt(endOfMonth(now)));
+  const isMonthlyMode = MONTHLY_PRESETS.includes(datePreset);
+
+  // Apply a preset → resolves the from/to window. For monthly presets we also
+  // pin selMonth/selYear (and the persisted dateFilter) to that month so the
+  // existing month-bound widgets follow the selection.
+  const applyDatePreset = (p: DatePreset) => {
+    setDatePreset(p);
+    const today = new Date();
+    if (p === 'This Month') {
+      const m = today.getMonth() + 1, y = today.getFullYear();
+      setSelMonth(m); setSelYear(y);
+      setFromDate(fmt(startOfMonth(today))); setToDate(fmt(endOfMonth(today)));
+      setDateFilter({ ...dateFilter, view: 'monthly', month: m, year: y });
+    } else if (p === 'Last Month') {
+      const d = subMonths(today, 1);
+      const m = d.getMonth() + 1, y = d.getFullYear();
+      setSelMonth(m); setSelYear(y);
+      setFromDate(fmt(startOfMonth(d))); setToDate(fmt(endOfMonth(d)));
+      setDateFilter({ ...dateFilter, view: 'monthly', month: m, year: y });
+    } else if (p === 'Last 3 Months') {
+      setFromDate(fmt(startOfMonth(subMonths(today, 2)))); setToDate(fmt(endOfMonth(today)));
+    } else if (p === 'This Year') {
+      setFromDate(fmt(startOfYear(today))); setToDate(fmt(endOfYear(today)));
+    } else if (p === 'Last Year') {
+      const d = subYears(today, 1);
+      setFromDate(fmt(startOfYear(d))); setToDate(fmt(endOfYear(d)));
+    }
+    // 'Custom' keeps whatever From/To are currently set.
+  };
+
+  // Manual month/year navigation (monthly mode only). Pins the selected month,
+  // its from/to bounds, and the persisted dateFilter, and snaps the preset label
+  // to This/Last Month when it matches — otherwise keeps a monthly preset so we
+  // stay in monthly mode (the subtitle shows the actual month either way).
+  const pickMonthYear = (m: number, y: number) => {
+    setSelMonth(m); setSelYear(y);
+    const d = new Date(y, m - 1);
+    setFromDate(fmt(startOfMonth(d))); setToDate(fmt(endOfMonth(d)));
+    const today = new Date();
+    const lm = subMonths(today, 1);
+    if (m === today.getMonth() + 1 && y === today.getFullYear()) setDatePreset('This Month');
+    else if (m === lm.getMonth() + 1 && y === lm.getFullYear()) setDatePreset('Last Month');
+    else setDatePreset('This Month'); // any other month: stay monthly; subtitle reflects the real month
+    setDateFilter({ ...dateFilter, view: 'monthly', month: m, year: y });
+  };
+
+  // The period filter handed to calculateDashboardKPIs (and used for the
+  // category-spend window). Monthly mode → month-bound filter; otherwise a
+  // custom from/to window that filterByDateRange already understands. In custom
+  // mode we deliberately drop month/year so calculateDashboardKPIs falls back to
+  // TODAY for its month-bound bits (upcoming fixed) — matching mbMonth/mbYear.
+  const filter: typeof dateFilter = useMemo(() => isMonthlyMode
+    ? { ...dateFilter, view: 'monthly', month: selMonth, year: selYear }
+    : { ...dateFilter, view: 'custom', month: undefined, year: undefined, start_date: fromDate, end_date: toDate },
+    [dateFilter, isMonthlyMode, selMonth, selYear, fromDate, toDate]);
+
+  // Month-bound month/year. In monthly mode this is the selected month; in
+  // custom/range mode month-bound widgets (budget, upcoming bills, salary bar,
+  // MoM chips) stay anchored to the CURRENT real month.
+  const mbMonth = isMonthlyMode ? selMonth : now.getMonth() + 1;
+  const mbYear = isMonthlyMode ? selYear : now.getFullYear();
+  const period = `${mbYear}-${String(mbMonth).padStart(2, '0')}`;
+
+  // Resolved window for the current selection — one code path for the
+  // category-spend pie. In monthly mode it's the selected month's bounds.
+  const rangeStart = isMonthlyMode ? fmt(startOfMonth(new Date(selYear, selMonth - 1))) : fromDate;
+  const rangeEnd = isMonthlyMode ? fmt(endOfMonth(new Date(selYear, selMonth - 1))) : toDate;
+
+  // Human-readable label for the selected period (used in the subtitle).
+  const periodLabel = isMonthlyMode
+    ? `${MONTHS[selMonth - 1]} ${selYear}`
+    : datePreset === 'Custom'
+      ? `${formatDate(fromDate)} → ${formatDate(toDate)}`
+      : `${datePreset} (${formatDate(fromDate)} → ${formatDate(toDate)})`;
 
   // ---- Multi-currency wiring ----
   // Base currency is the user's setting; the display currency is a UI-only,
@@ -134,7 +242,7 @@ export default function DashboardPage() {
   // NORMALIZED balances — every figure in the display currency (KPI totals, alerts).
   const normBalances = useMemo(() => calculateAccountBalances(norm.accounts, norm.income, norm.transactions), [norm]);
   const kpis = useMemo(() => settings ? calculateDashboardKPIs(norm.accounts, norm.income, norm.transactions, displayFixedExpenses, filter, settings) : null, [norm, displayFixedExpenses, filter, settings]);
-  const budgetStatus = useMemo(() => calculateBudgetStatus(budgets, norm.transactions, displayFixedExpenses, now, selMonth, selYear), [budgets, norm.transactions, displayFixedExpenses, selMonth, selYear]);
+  const budgetStatus = useMemo(() => calculateBudgetStatus(budgets, norm.transactions, displayFixedExpenses, now, mbMonth, mbYear), [budgets, norm.transactions, displayFixedExpenses, mbMonth, mbYear]);
   const trends = useMemo(() => buildMonthlyTrends(norm.income, norm.transactions, 12), [norm.income, norm.transactions]);
 
   // Net worth at the end of each of the last 12 months, all in the DISPLAY
@@ -160,10 +268,12 @@ export default function DashboardPage() {
       return { month: d.toLocaleString('default', { month: 'short' }) + ' ' + String(d.getFullYear()).slice(2), netWorth: Math.round(nw) };
     });
   }, [norm]);
+  // Category-spend pie follows the SELECTED period: the resolved from/to window
+  // (custom/range mode) or the selected month's bounds (monthly mode) — one path.
   const catSpend = useMemo(() => getCategorySpend(
-    norm.transactions.filter(t => t.date.startsWith(period)),
+    norm.transactions.filter(t => t.date >= rangeStart && t.date <= rangeEnd),
     categories.map(c => ({ name: c.name, color: c.color }))
-  ), [norm.transactions, period, categories]);
+  ), [norm.transactions, rangeStart, rangeEnd, categories]);
   const activeAlerts = useMemo(() => generateAlerts(budgetStatus, normBalances, displayFixedExpenses, settings ?? { safe_spend_buffer: 5000 } as any, sym), [budgetStatus, normBalances, displayFixedExpenses, settings, sym]);
 
   const balOf = (id?: string) => normBalances.find(b => b.account.id === id);
@@ -195,21 +305,23 @@ export default function DashboardPage() {
     return displayFixedExpenses
       .filter(fe => {
         if (!fe.is_active) return false;
-        const occ = safeDueDate(fe.due_day, selYear, selMonth - 1);
+        const occ = safeDueDate(fe.due_day, mbYear, mbMonth - 1);
         if (fe.start_date && occ < fe.start_date) return false;
         if (fe.end_date && occ > fe.end_date) return false;
         return !postedKeys.has(`${fe.id}:${period}`);
       })
-      .map(fe => ({ fe, occ: safeDueDate(fe.due_day, selYear, selMonth - 1) }))
+      .map(fe => ({ fe, occ: safeDueDate(fe.due_day, mbYear, mbMonth - 1) }))
       .sort((a, b) => a.occ.localeCompare(b.occ));
-  }, [displayFixedExpenses, transactions, selYear, selMonth, period]);
+  }, [displayFixedExpenses, transactions, mbYear, mbMonth, period]);
 
-  // Split this month's "saving" transactions into true savings vs investments
+  // Split the PERIOD's "saving" transactions into true savings vs investments
   // (a saving whose destination is an investment account is an investment).
+  // Filtered by the same resolved window as kpis.total_savings so the split
+  // nets cleanly — month bounds in monthly mode, the from/to range otherwise.
   const investAcctIds = useMemo(() => new Set(investBalances.map(b => b.account.id)), [investBalances]);
   // Use normalized transactions so this nets cleanly against kpis.total_savings
   // (also normalized) when building the savings-vs-invested split.
-  const investedPeriod = useMemo(() => norm.transactions.filter(t => t.type === 'saving' && t.date.startsWith(period) && t.to_account_id && investAcctIds.has(t.to_account_id)).reduce((s, t) => s + t.amount, 0), [norm.transactions, period, investAcctIds]);
+  const investedPeriod = useMemo(() => norm.transactions.filter(t => t.type === 'saving' && t.date >= rangeStart && t.date <= rangeEnd && t.to_account_id && investAcctIds.has(t.to_account_id)).reduce((s, t) => s + t.amount, 0), [norm.transactions, rangeStart, rangeEnd, investAcctIds]);
   const savedPeriod = (kpis?.total_savings ?? 0) - investedPeriod;
 
   // For Safe-to-Spend, reserve only bank/cash-paid bills — card-charged ones
@@ -221,10 +333,12 @@ export default function DashboardPage() {
   // Honest safe-to-spend (can be negative): spendable − bank-paid bills − card debt − buffer.
   const trueSafe = Math.round(spendable - bankPaidUpcoming - ccOutstanding - buffer);
 
-  // Salary detection & monthly limit. Normalized so the bar compares like-for-like
-  // against spentThisMonth (kpis.total_expense, also in the display currency).
+  // Salary detection & monthly limit. The salary bar is a MONTH-BOUND widget, so
+  // both figures use the month-bound period (selected month in monthly mode, the
+  // real current month otherwise). Normalized so they compare like-for-like in
+  // the display currency. In monthly mode spentThisMonth === kpis.total_expense.
   const salaryThisMonth = useMemo(() => norm.income.filter(i => (i.category || '').toLowerCase().includes('salary') && i.date.startsWith(period)).reduce((s, i) => s + i.amount, 0), [norm.income, period]);
-  const spentThisMonth = kpis?.total_expense ?? 0;
+  const spentThisMonth = useMemo(() => norm.transactions.filter(t => t.type === 'expense' && t.date.startsWith(period)).reduce((s, t) => s + t.amount, 0), [norm.transactions, period]);
   const salaryLeft = salaryThisMonth - spentThisMonth;
   const salaryPct = salaryThisMonth > 0 ? Math.min(100, Math.max(0, (spentThisMonth / salaryThisMonth) * 100)) : 0;
 
@@ -430,18 +544,35 @@ export default function DashboardPage() {
       <div className="page-header">
         <div>
           <h1 className="page-title">Dashboard</h1>
-          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Financial overview — {MONTHS[selMonth - 1]} {selYear}</p>
+          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Financial overview — {periodLabel}</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           {currenciesInUse.length > 1 && (
             <CurrencySelect value={displayCur} onChange={setDisplayCur} options={currenciesInUse} />
           )}
-          <select className="form-select text-sm py-2 px-3 pr-8 w-auto" value={selMonth} onChange={e => { setSelMonth(+e.target.value); setDateFilter({ ...filter, month: +e.target.value }); }}>
-            {MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
-          </select>
-          <select className="form-select text-sm py-2 px-3 pr-8 w-auto" value={selYear} onChange={e => { setSelYear(+e.target.value); setDateFilter({ ...filter, year: +e.target.value }); }}>
-            {YEARS.map(y => <option key={y} value={y}>{y}</option>)}
-          </select>
+          {/* Flexible period control: preset + (monthly month/year) or (custom From/To) */}
+          <div className="inline-flex items-center gap-1.5 rounded-lg px-1.5 py-1 border" style={{ borderColor: 'var(--border-default)', background: 'var(--bg-secondary, transparent)' }}>
+            <CalendarRange size={15} style={{ color: 'var(--text-muted)' }} className="ml-1 flex-shrink-0" />
+            <select className="form-select text-sm py-1.5 px-2 pr-7 w-auto border-0 bg-transparent" value={datePreset} onChange={e => applyDatePreset(e.target.value as DatePreset)} title="Quick period">
+              {DATE_PRESETS.map(p => <option key={p} value={p}>{p}</option>)}
+            </select>
+            {isMonthlyMode ? (
+              <>
+                <select className="form-select text-sm py-1.5 px-2 pr-7 w-auto border-0 bg-transparent" value={selMonth} onChange={e => pickMonthYear(+e.target.value, selYear)} title="Month">
+                  {MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+                </select>
+                <select className="form-select text-sm py-1.5 px-2 pr-7 w-auto border-0 bg-transparent" value={selYear} onChange={e => pickMonthYear(selMonth, +e.target.value)} title="Year">
+                  {YEARS.map(y => <option key={y} value={y}>{y}</option>)}
+                </select>
+              </>
+            ) : (
+              <>
+                <input type="date" className="form-input text-sm py-1.5 px-2 w-auto border-0 bg-transparent" value={fromDate} onChange={e => { setFromDate(e.target.value); setDatePreset('Custom'); }} title="From date" />
+                <span className="text-xs" style={{ color: 'var(--text-muted)' }}>to</span>
+                <input type="date" className="form-input text-sm py-1.5 px-2 w-auto border-0 bg-transparent" value={toDate} onChange={e => { setToDate(e.target.value); setDatePreset('Custom'); }} title="To date" />
+              </>
+            )}
+          </div>
         </div>
       </div>
 
@@ -491,22 +622,32 @@ export default function DashboardPage() {
           // Safe to spend is a balance figure — no MoM delta chip
           else if (c.label === 'Safe to spend') { momDelta = null; }
 
-          const showDelta = momDelta !== null && Math.abs(momDelta) > 0;
+          // MoM chips are month-to-month concepts — only shown in monthly mode.
+          const showDelta = isMonthlyMode && momDelta !== null && Math.abs(momDelta) > 0;
           const deltaGood = momDelta !== null && (momDeltaPositiveIsGood ? momDelta > 0 : momDelta < 0);
           const deltaUp = momDelta !== null && momDelta > 0;
 
+          const accent = CARD_ACCENT[c.label];
+          const AccentIcon = accent?.icon;
           return (
             <button
               key={c.label}
               onClick={() => setDetail(c.detail)}
-              className="card p-4 text-left w-full relative group transition-all duration-200 hover:-translate-y-1 hover:shadow-xl active:scale-[0.99] animate-fade-in-up"
+              className="card p-4 text-left w-full relative group overflow-hidden transition-all duration-200 hover:-translate-y-1 hover:shadow-xl active:scale-[0.99] animate-fade-in-up"
               style={{ animationDelay: `${i * 40}ms` }}
             >
-              {c.label === 'Ready to sweep' || c.label === 'Swept to savings'
-                ? <ArrowDownToLine size={14} className="absolute top-3 right-3 text-blue-400 opacity-70 group-hover:opacity-100 transition-opacity" />
-                : <Info size={14} className="absolute top-3 right-3 text-slate-300 group-hover:text-blue-500 transition-colors" />}
-              <div className="text-xs sm:text-sm" style={{ color: 'var(--text-secondary)' }}>{c.label}</div>
-              <Amount value={c.value} sym={sym} className={`block text-xl sm:text-2xl font-bold mt-1 ${toneClass(c.tone)}`} />
+              {/* Subtle accent strip on the left edge */}
+              {accent && <span className="absolute left-0 top-0 bottom-0 w-1 rounded-l-xl" style={{ background: accent.color, opacity: 0.85 }} />}
+              <Info size={14} className="absolute top-3 right-3 text-slate-300 group-hover:text-blue-500 transition-colors" />
+              <div className="flex items-center gap-2">
+                {AccentIcon && (
+                  <span className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: `${accent.color}1a`, color: accent.color }}>
+                    <AccentIcon size={15} />
+                  </span>
+                )}
+                <div className="text-xs sm:text-sm truncate" style={{ color: 'var(--text-secondary)' }}>{c.label}</div>
+              </div>
+              <Amount value={c.value} sym={sym} className={`block text-xl sm:text-2xl font-bold mt-1.5 ${toneClass(c.tone)}`} />
               <div className="text-[11px] sm:text-xs mt-1" style={{ color: 'var(--text-muted)' }}>{c.sub}</div>
               {showDelta && momDelta !== null && (
                 <div className={`text-xs mt-1.5 font-medium ${deltaGood ? 'text-emerald-600' : 'text-red-500'}`}>
@@ -519,15 +660,21 @@ export default function DashboardPage() {
 
         {/* Savings Rate KPI card */}
         <div
-          className="card p-4 text-left w-full relative animate-fade-in-up"
+          className="card p-4 text-left w-full relative overflow-hidden animate-fade-in-up"
           style={{ animationDelay: `${allCards.length * 40}ms` }}
         >
-          <div className="text-xs sm:text-sm" style={{ color: 'var(--text-secondary)' }}>Savings Rate</div>
-          <div className={`block text-xl sm:text-2xl font-bold mt-1 ${savingsRate >= 20 ? 'text-emerald-600' : savingsRate >= 10 ? 'text-amber-500' : 'text-red-500'}`}>
+          <span className="absolute left-0 top-0 bottom-0 w-1 rounded-l-xl" style={{ background: '#14b8a6', opacity: 0.85 }} />
+          <div className="flex items-center gap-2">
+            <span className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: '#14b8a61a', color: '#14b8a6' }}>
+              <Percent size={15} />
+            </span>
+            <div className="text-xs sm:text-sm truncate" style={{ color: 'var(--text-secondary)' }}>Savings Rate</div>
+          </div>
+          <div className={`block text-xl sm:text-2xl font-bold mt-1.5 ${savingsRate >= 20 ? 'text-emerald-600' : savingsRate >= 10 ? 'text-amber-500' : 'text-red-500'}`}>
             {savingsRate.toFixed(1)}%
           </div>
           <div className="text-[11px] sm:text-xs mt-1" style={{ color: 'var(--text-muted)' }}>of true income</div>
-          {Math.abs(momSavDelta) > 0 && (
+          {isMonthlyMode && Math.abs(momSavDelta) > 0 && (
             <div className={`text-xs mt-1.5 font-medium ${momSavDelta > 0 ? 'text-emerald-600' : 'text-red-500'}`}>
               {momSavDelta > 0 ? '▲' : '▼'} {formatCurrency(Math.abs(momSavDelta), sym, true)} vs last month
             </div>
@@ -566,9 +713,10 @@ export default function DashboardPage() {
         </div>
 
         <div className="card card-p animate-fade-in-up">
-          <h3 className="section-title text-base mb-4">Expense by Category</h3>
+          <h3 className="section-title text-base mb-1">Expense by Category</h3>
+          <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>{periodLabel}</p>
           {catSpend.length === 0 ? (
-            <div className="flex items-center justify-center h-48 text-center"><p className="text-sm" style={{ color: 'var(--text-muted)' }}>No expenses this month</p></div>
+            <div className="flex items-center justify-center h-48 text-center"><p className="text-sm" style={{ color: 'var(--text-muted)' }}>No expenses for this period</p></div>
           ) : (
             <>
               <ResponsiveContainer width="100%" height={160}>
