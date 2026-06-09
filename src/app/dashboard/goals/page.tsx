@@ -1,19 +1,87 @@
 'use client';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useAppStore } from '@/lib/store/appStore';
 import { createClient } from '@/lib/supabase/client';
 import { Goal } from '@/types';
 import { calculateAccountBalances, analyzeGoal, formatCurrency, currencySymbol, convertAmount } from '@/lib/utils/calculations';
 import { useDisplayCurrency } from '@/lib/useDisplayCurrency';
 import toast from 'react-hot-toast';
-import { Plus, Pencil, Trash2, X, Check, Target, CheckCircle, AlertTriangle, Clock, TrendingUp, Flag } from 'lucide-react';
+import { Plus, Pencil, Trash2, X, Check, Target, CheckCircle, AlertTriangle, Clock, TrendingUp, Flag, Sparkles, SlidersHorizontal } from 'lucide-react';
 import { RadialBarChart, RadialBar, ResponsiveContainer } from 'recharts';
+import { addMonths, format, parseISO, differenceInCalendarMonths } from 'date-fns';
+
+type AllocMode = 'auto' | 'manual';
+const ALLOC_MODE_KEY = 'mcs_goal_alloc_mode';
 
 const PRIORITY_LABELS: Record<number, string> = { 1:'Critical', 2:'High', 3:'Medium', 4:'Low', 5:'Optional' };
 const EMPTY: Omit<Goal, 'id'|'user_id'|'created_at'|'updated_at'> = {
   name:'', goal_type:'', priority:3, expected_cost:0, planned_purchase_date:undefined,
   amount_allocated:0, monthly_saving_plan:0, payment_plan:'', is_active:true, notes:'',
 };
+
+type GoalAnalysisResult = ReturnType<typeof analyzeGoal>;
+
+interface Timeline {
+  hasTarget: boolean;
+  targetDate: Date | null;
+  projectedDate: Date | null;   // null when there's no viable saving plan
+  noPlan: boolean;              // can't afford & monthly plan <= 0
+  onTrack: boolean;             // affordable now, or projected <= target (or no target)
+  // Position of the projected-ready marker along Now -> Target, 0..1.
+  // Only meaningful when a target date exists.
+  markerPct: number;
+  monthsBehind: number;         // months projected is past the target (0 if on track)
+}
+
+// Compute the visual timeline for one goal. Pure: depends only on `now`,
+// the goal's target date and its analysis (months to ready / affordability).
+function computeTimeline(a: GoalAnalysisResult, now: Date = new Date()): Timeline {
+  const g = a.goal;
+  let targetDate: Date | null = null;
+  if (g.planned_purchase_date) {
+    try {
+      const d = parseISO(g.planned_purchase_date);
+      if (!Number.isNaN(d.getTime())) targetDate = d;
+    } catch { targetDate = null; }
+  }
+  const hasTarget = targetDate !== null;
+
+  // No saving plan and not affordable → no projected date.
+  const noPlan = !a.can_buy_now && g.monthly_saving_plan <= 0;
+
+  let projectedDate: Date | null;
+  if (a.can_buy_now) {
+    projectedDate = now;                                   // ready right now
+  } else if (noPlan) {
+    projectedDate = null;
+  } else {
+    projectedDate = addMonths(now, Math.max(0, a.months_needed));
+  }
+
+  // How far the projected-ready point sits between Now and Target (0..1).
+  let markerPct = 0;
+  let monthsBehind = 0;
+  let onTrack = a.can_buy_now;
+  if (hasTarget && targetDate) {
+    const totalMonths = Math.max(1, differenceInCalendarMonths(targetDate, now));
+    if (projectedDate) {
+      const projMonths = differenceInCalendarMonths(projectedDate, now);
+      markerPct = Math.min(1, Math.max(0, projMonths / totalMonths));
+      onTrack = a.can_buy_now || projectedDate.getTime() <= targetDate.getTime();
+      if (!onTrack) {
+        monthsBehind = Math.max(0, differenceInCalendarMonths(projectedDate, targetDate));
+      }
+    } else {
+      markerPct = 1;          // no plan → push marker to the far end
+      onTrack = false;
+    }
+  } else {
+    // No target set: on-track only if affordable now; otherwise treat as behind.
+    onTrack = a.can_buy_now;
+  }
+
+  return { hasTarget, targetDate, projectedDate, noPlan, onTrack, markerPct, monthsBehind };
+}
 
 export default function GoalsPage() {
   const { goals, accounts, income, transactions, addGoal, updateGoal, removeGoal, settings } = useAppStore();
@@ -22,6 +90,19 @@ export default function GoalsPage() {
   const [form, setForm] = useState<typeof EMPTY>({...EMPTY});
   const [saving, setSaving] = useState(false);
   const sb = createClient();
+
+  // ---- Allocation mode (persisted) ----
+  // 'auto'   = shared savings pool is allocated to active goals by priority.
+  // 'manual' = each goal uses ONLY its own amount_allocated; the pool is ignored.
+  const [allocMode, setAllocMode] = useState<AllocMode>('auto');
+  useEffect(() => {
+    const saved = localStorage.getItem(ALLOC_MODE_KEY);
+    if (saved === 'auto' || saved === 'manual') setAllocMode(saved);
+  }, []);
+  const changeAllocMode = (mode: AllocMode) => {
+    setAllocMode(mode);
+    localStorage.setItem(ALLOC_MODE_KEY, mode);
+  };
 
   // ---- Multi-currency wiring ----
   // Goal amounts (expected_cost, amount_allocated, monthly_saving_plan) are
@@ -71,17 +152,45 @@ export default function GoalsPage() {
     // compete against the same full pool — buying goal #1 leaves less for #2.
     // If a goal has amount_allocated > 0, use that dedicated amount instead
     // of drawing from the shared pool.
+    // In 'manual' mode the shared pool is ignored entirely: each goal sees
+    // ONLY its own amount_allocated (so 0-allocated goals show 0 available).
     let remainingPool = totalSavings;
     return activeGoals.map(g => {
-      const available = g.amount_allocated > 0 ? g.amount_allocated : remainingPool;
+      let available: number;
+      let allocSource: 'pool' | 'manual' | 'none';
+      if (allocMode === 'manual') {
+        available = g.amount_allocated > 0 ? g.amount_allocated : 0;
+        allocSource = g.amount_allocated > 0 ? 'manual' : 'none';
+      } else if (g.amount_allocated > 0) {
+        available = g.amount_allocated;
+        allocSource = 'manual';
+      } else {
+        available = remainingPool;
+        allocSource = 'pool';
+      }
       const analysis = analyzeGoal(g, available);
       // Deduct this goal's cost from the shared pool only if it draws from it
-      if (g.amount_allocated <= 0 && analysis.can_buy_now) {
+      // (auto mode, no dedicated allocation, and it's actually affordable now).
+      if (allocMode === 'auto' && g.amount_allocated <= 0 && analysis.can_buy_now) {
         remainingPool = Math.max(0, remainingPool - g.expected_cost);
       }
-      return analysis;
+      // What the card should report as "allocated to this goal".
+      const allocated = allocSource === 'manual' ? g.amount_allocated : analysis.available_saving;
+      return { ...analysis, allocSource, allocated, timeline: computeTimeline(analysis) };
     });
-  }, [activeGoals, totalSavings]);
+  }, [activeGoals, totalSavings, allocMode]);
+
+  // Pool still unallocated after auto sequential allocation (auto mode only).
+  const unallocatedPool = useMemo(() => {
+    if (allocMode !== 'auto') return totalSavings;
+    let remaining = totalSavings;
+    for (const g of activeGoals) {
+      if (g.amount_allocated <= 0 && remaining >= g.expected_cost) {
+        remaining = Math.max(0, remaining - g.expected_cost);
+      }
+    }
+    return remaining;
+  }, [activeGoals, totalSavings, allocMode]);
 
   const openNew = () => { setEditing(null); setForm({...EMPTY}); setShowForm(true); };
   const openEdit = (g: Goal) => {
@@ -144,13 +253,49 @@ export default function GoalsPage() {
         <button onClick={openNew} className="btn-md btn-primary"><Plus size={16}/> Add Goal</button>
       </div>
 
+      {/* Allocation mode toggle */}
+      <div className="card card-p">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <SlidersHorizontal size={16} style={{ color:'var(--text-secondary)' }} />
+            <div>
+              <p className="text-sm font-medium">Allocation mode</p>
+              <p className="text-xs" style={{ color:'var(--text-muted)' }}>
+                {allocMode === 'auto'
+                  ? 'Shared savings pool is split across active goals by priority.'
+                  : 'Each goal uses only its own allocated amount; the pool is ignored.'}
+              </p>
+            </div>
+          </div>
+          <div className="inline-flex rounded-lg p-0.5 self-start" style={{ background:'var(--bg-subtle)' }} role="tablist" aria-label="Allocation mode">
+            {(['auto','manual'] as const).map(m => (
+              <button
+                key={m}
+                role="tab"
+                aria-selected={allocMode === m}
+                onClick={() => changeAllocMode(m)}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${allocMode === m ? 'bg-white dark:bg-slate-700 shadow-sm text-blue-700 dark:text-blue-300' : 'text-slate-500 dark:text-slate-400'}`}
+              >
+                {m === 'auto' ? 'Auto (by priority)' : 'Manual'}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
       {/* Savings Pool Banner */}
       <div className="card card-p bg-gradient-to-r from-blue-50 to-emerald-50 dark:from-blue-900/20 dark:to-emerald-900/20 border-blue-200 dark:border-blue-800">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <p className="text-sm font-medium" style={{ color:'var(--text-secondary)' }}>Available Savings Pool</p>
             <p className="text-3xl font-bold text-blue-700 dark:text-blue-300 mt-0.5">{formatCurrency(totalSavings, sym)}</p>
-            <p className="text-xs mt-1" style={{ color:'var(--text-muted)' }}>From accounts marked "Include in Goal Savings"</p>
+            {allocMode === 'auto' ? (
+              <p className="text-xs mt-1" style={{ color:'var(--text-muted)' }}>
+                Unallocated after goals: <span className="font-semibold">{formatCurrency(unallocatedPool, sym)}</span> · From accounts marked "Include in Goal Savings"
+              </p>
+            ) : (
+              <p className="text-xs mt-1" style={{ color:'var(--text-muted)' }}>Pool ignored in manual mode · From accounts marked "Include in Goal Savings"</p>
+            )}
           </div>
           <div className="text-sm space-y-1">
             {savingsBalances.map(b => (
@@ -174,7 +319,7 @@ export default function GoalsPage() {
             <p className="text-sm" style={{ color:'var(--text-muted)' }}>No goals yet. Add your first goal to see if you can afford it.</p>
           </div>
         )}
-        {goalAnalyses.map(({ goal:g, available_saving, remaining_gap, can_buy_now, months_needed, risk_level, suggested_action, progress_percent }) => (
+        {goalAnalyses.map(({ goal:g, available_saving, remaining_gap, can_buy_now, months_needed, risk_level, suggested_action, progress_percent, allocSource, allocated, timeline }) => (
           <div key={g.id} className={`card card-p group relative overflow-hidden ${can_buy_now ? 'border-emerald-200 dark:border-emerald-700' : ''}`}>
             {can_buy_now && <div className="absolute top-0 right-0 w-20 h-20 bg-emerald-500/10 rounded-bl-full"/>}
             <div className="flex items-start justify-between mb-2">
@@ -213,12 +358,25 @@ export default function GoalsPage() {
             </div>
 
             <div className="space-y-1.5 text-xs mb-3" style={{ color:'var(--text-secondary)' }}>
+              <div className="flex justify-between gap-2">
+                <span>Allocated</span>
+                <span className="font-medium text-right">
+                  {formatCurrency(allocated, sym)}{' '}
+                  <span style={{ color:'var(--text-muted)' }}>
+                    {allocSource === 'manual' ? '(manual)' : allocSource === 'pool' ? '(from pool)' : '(none)'}
+                  </span>
+                </span>
+              </div>
               {g.monthly_saving_plan > 0 && <div className="flex justify-between"><span>Monthly Saving Plan</span><span className="font-medium">{formatCurrency(g.monthly_saving_plan, sym)}</span></div>}
               {!can_buy_now && months_needed < 9999 && (
                 <div className="flex justify-between"><span>Months Needed</span><span className="font-medium">{months_needed} months (~{(months_needed/12).toFixed(1)} yrs)</span></div>
               )}
               {g.planned_purchase_date && <div className="flex justify-between"><span>Target Date</span><span className="font-medium">{g.planned_purchase_date}</span></div>}
             </div>
+
+            {/* Visual timeline: Now → Target with a projected-ready marker */}
+            <GoalTimeline timeline={timeline} progress={progress_percent} canBuyNow={can_buy_now} />
+
 
             <div className={`rounded-lg p-2.5 text-xs ${can_buy_now ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300' : risk_level === 'not_ready' ? 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300' : 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300'}`}>
               <div className="flex items-start gap-1.5">
@@ -301,6 +459,66 @@ export default function GoalsPage() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// Compact Now → Target timeline with a projected-ready marker (★) and a
+// progress fill. Green when on track / affordable, amber/red when behind or
+// when there's no saving plan / no target. Designed to wrap cleanly at ~360px.
+function GoalTimeline({ timeline, progress, canBuyNow }: { timeline: Timeline; progress: number; canBuyNow: boolean }) {
+  const { hasTarget, targetDate, projectedDate, noPlan, onTrack, markerPct, monthsBehind } = timeline;
+  const ok = onTrack || canBuyNow;
+  const barColor = ok ? '#22c55e' : '#f59e0b';
+
+  const projectedLabel = noPlan
+    ? 'No saving plan — set a monthly plan'
+    : canBuyNow
+      ? 'Ready now'
+      : projectedDate
+        ? `Ready ~ ${format(projectedDate, 'MMM yyyy')}`
+        : '—';
+
+  const statusLine = canBuyNow
+    ? 'Affordable now'
+    : !hasTarget
+      ? projectedLabel
+      : noPlan
+        ? 'Behind — no saving plan'
+        : onTrack
+          ? (targetDate ? `On track for ${format(targetDate, 'MMM yyyy')}` : 'On track')
+          : `Behind by ~${monthsBehind} month${monthsBehind === 1 ? '' : 's'}`;
+
+  const fillPct = Math.min(100, Math.max(0, progress));
+
+  return (
+    <div className="mb-3">
+      <div className="flex items-center justify-between gap-2 text-[11px] mb-1 flex-wrap" style={{ color:'var(--text-muted)' }}>
+        <span>Now</span>
+        <span className="text-right">{hasTarget && targetDate ? format(targetDate, 'MMM yyyy') : 'No target set'}</span>
+      </div>
+      <div className="relative h-2 rounded-full overflow-visible" style={{ background:'var(--bg-subtle)' }}>
+        {/* progress fill */}
+        <div className="absolute inset-y-0 left-0 rounded-full" style={{ width:`${fillPct}%`, background:barColor }} />
+        {/* projected-ready marker (only meaningful when a target exists) */}
+        {hasTarget && !noPlan && (
+          <span
+            className="absolute -top-[7px] text-[13px] leading-none select-none"
+            style={{ left:`calc(${(markerPct * 100).toFixed(2)}% )`, transform:'translateX(-50%)', color:barColor }}
+            title={projectedLabel}
+            aria-hidden
+          >
+            ★
+          </span>
+        )}
+      </div>
+      <div className="flex items-center gap-1.5 mt-1.5 text-[11px] flex-wrap" style={{ color: ok ? 'var(--text-secondary)' : '#b45309' }}>
+        <Sparkles size={11} className="flex-shrink-0" style={{ color: barColor }} />
+        <span className="font-medium">{statusLine}</span>
+        {hasTarget && !canBuyNow && !noPlan && (
+          <span style={{ color:'var(--text-muted)' }}>· {projectedLabel}</span>
+        )}
+      </div>
     </div>
   );
 }

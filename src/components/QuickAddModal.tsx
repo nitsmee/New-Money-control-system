@@ -4,6 +4,8 @@ import { X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { createClient } from '@/lib/supabase/client';
 import { useAppStore } from '@/lib/store/appStore';
+import { isOnline, offlineQueue } from '@/lib/offline';
+import type { Transaction } from '@/types';
 
 interface Props {
   isOpen: boolean;
@@ -56,7 +58,11 @@ export function QuickAddModal({ isOpen, onClose, onSaved }: Props) {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
-      const { data, error } = await supabase.from('transactions').insert({
+      // Client-generated id so the offline-queued write and the eventual DB
+      // row share a key (no duplicate when it later syncs).
+      const id = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+      const row = {
+        id,
         date,
         amount: amt,
         type,
@@ -65,11 +71,19 @@ export function QuickAddModal({ isOpen, onClose, onSaved }: Props) {
         to_account_id: type === 'saving' ? (toAccountId || null) : null,
         period: date.slice(0, 7),
         user_id: user.id,
-      }).select().single();
-      if (error) throw error;
+      };
 
-      useAppStore.getState().addTransaction(data);
-      toast.success('Transaction saved');
+      if (isOnline()) {
+        const { data, error } = await supabase.from('transactions').insert(row).select().single();
+        if (error) throw error;
+        useAppStore.getState().addTransaction(data);
+        toast.success('Transaction saved');
+      } else {
+        // Offline: queue it and optimistically show it now.
+        offlineQueue.enqueue({ id, table: 'transactions', payload: row, createdAt: Date.now() });
+        useAppStore.getState().addTransaction({ ...row, is_fixed_expense_auto: false, created_at: new Date().toISOString(), updated_at: new Date().toISOString() } as Transaction);
+        toast('Saved offline — will sync when you reconnect', { icon: '📴' });
+      }
       onSaved();
       onClose();
       setAmount('');

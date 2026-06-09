@@ -42,6 +42,11 @@ interface AppState {
   updateTransaction: (id: string, tx: Partial<Transaction>) => void;
   removeTransaction: (id: string) => void;
 
+  // Recycle bin (soft-deleted transactions)
+  recycledTransactions: Transaction[];
+  setRecycledTransactions: (t: Transaction[]) => void;
+  loadRecycled: (userId: string) => Promise<void>;
+
   addFixedExpense: (fe: FixedExpense) => void;
   updateFixedExpense: (id: string, fe: Partial<FixedExpense>) => void;
   removeFixedExpense: (id: string) => void;
@@ -125,7 +130,7 @@ export const useAppStore = create<AppState>()(
             sb.from('categories').select('*').eq('user_id', userId).order('sort_order'),
             sb.from('owners').select('*').eq('user_id', userId).order('sort_order'),
             sb.from('income').select('*').eq('user_id', userId).order('date', { ascending: false }),
-            sb.from('transactions').select('*').eq('user_id', userId).order('date', { ascending: false }),
+            sb.from('transactions').select('*').eq('user_id', userId).is('deleted_at', null).order('date', { ascending: false }),
             sb.from('fixed_expenses').select('*').eq('user_id', userId).order('sort_order'),
             sb.from('budget').select('*').eq('user_id', userId),
             sb.from('goals').select('*').eq('user_id', userId).order('priority'),
@@ -167,6 +172,16 @@ export const useAppStore = create<AppState>()(
       addTransaction: (tx) => set(s => ({ transactions: [tx, ...s.transactions] })),
       updateTransaction: (id, data) => set(s => ({ transactions: s.transactions.map(t => t.id === id ? { ...t, ...data } : t) })),
       removeTransaction: (id) => set(s => ({ transactions: s.transactions.filter(t => t.id !== id) })),
+
+      recycledTransactions: [],
+      setRecycledTransactions: (t) => set({ recycledTransactions: t }),
+      loadRecycled: async (userId) => {
+        const sb = createClient();
+        const { data } = await sb.from('transactions').select('*')
+          .eq('user_id', userId).not('deleted_at', 'is', null)
+          .order('deleted_at', { ascending: false });
+        set({ recycledTransactions: data ?? [] });
+      },
 
       // Fixed expense CRUD
       addFixedExpense: (fe) => set(s => ({ fixedExpenses: [fe, ...s.fixedExpenses] })),

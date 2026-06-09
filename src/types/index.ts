@@ -149,6 +149,7 @@ export interface Transaction {
   is_fixed_expense_auto: boolean;
   fixed_expense_id?: string;
   period?: string;
+  deleted_at?: string | null;   // set when in the recycle bin
   created_at: string;
   updated_at: string;
   // joined

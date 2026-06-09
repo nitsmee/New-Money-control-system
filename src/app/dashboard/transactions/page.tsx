@@ -12,6 +12,7 @@ import { DuplicateWarning } from '@/components/DuplicateWarning';
 import { QuickAddModal } from '@/components/QuickAddModal';
 import { CSVImportModal } from '@/components/CSVImportModal';
 import { MultiSelect } from '@/components/MultiSelect';
+import { isOnline, offlineQueue } from '@/lib/offline';
 
 const EMPTY = {
   date: new Date().toISOString().split('T')[0],
@@ -224,15 +225,15 @@ export default function TransactionsPage() {
 
   const handleBulkDelete = async () => {
     if (selectedIds.size === 0) return;
-    if (!confirm(`Delete ${selectedIds.size} selected transaction(s)? This cannot be undone.`)) return;
+    if (!confirm(`Move ${selectedIds.size} selected transaction(s) to the Recycle Bin? You can restore them later.`)) return;
     setBulkDeleting(true);
     try {
       const ids = [...selectedIds];
-      const { error } = await sb.from('transactions').delete().in('id', ids);
+      const { error } = await sb.from('transactions').update({ deleted_at: new Date().toISOString() }).in('id', ids);
       if (error) throw error;
       ids.forEach(id => removeTransaction(id));
       setSelectedIds(new Set());
-      toast.success(`Deleted ${ids.length} transaction(s)`);
+      toast.success(`Moved ${ids.length} to Recycle Bin`);
     } catch (e: any) {
       toast.error(e.message);
     } finally {
@@ -303,10 +304,17 @@ export default function TransactionsPage() {
   };
 
   const doInsert = async (payload: any) => {
-    const { data, error } = await sb.from('transactions').insert(payload).select().single();
-    if (error) throw error;
-    addTransaction(data);
-    toast.success('Transaction added');
+    if (isOnline()) {
+      const { data, error } = await sb.from('transactions').insert(payload).select().single();
+      if (error) throw error;
+      addTransaction(data);
+      toast.success('Transaction added');
+    } else {
+      offlineQueue.enqueue({ id: payload.id, table: 'transactions', payload, createdAt: Date.now() });
+      const now = new Date().toISOString();
+      addTransaction({ ...payload, created_at: now, updated_at: now } as Transaction);
+      toast('Saved offline — will sync when you reconnect', { icon: '📴' });
+    }
     setShowForm(false);
     setShowDupWarning(false);
     setPendingPayload(null);
@@ -334,6 +342,11 @@ export default function TransactionsPage() {
         toast.success('Transaction updated');
         setShowForm(false);
       } else {
+        // New rows get a client-generated id so the same row can be queued
+        // offline and later upserted idempotently. Also flag auto-fixed-expense
+        // as false (manual entry).
+        const id = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+        const addPayload = { ...payload, id, is_fixed_expense_auto: false };
         // Duplicate check (new transactions only)
         const threeDaysAgo = new Date();
         threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
@@ -346,12 +359,12 @@ export default function TransactionsPage() {
         );
         if (matches.length > 0) {
           setDuplicateMatches(matches);
-          setPendingPayload(payload);
+          setPendingPayload(addPayload);
           setShowDupWarning(true);
           setSaving(false);
           return;
         }
-        await doInsert(payload);
+        await doInsert(addPayload);
       }
     } catch (e: any) {
       toast.error(e.message);
@@ -359,13 +372,13 @@ export default function TransactionsPage() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Delete this transaction? This cannot be undone.')) return;
+    if (!confirm('Move this transaction to the Recycle Bin? You can restore it later.')) return;
     setDeleting(id);
     try {
-      const { error } = await sb.from('transactions').delete().eq('id', id);
+      const { error } = await sb.from('transactions').update({ deleted_at: new Date().toISOString() }).eq('id', id);
       if (error) throw error;
       removeTransaction(id);
-      toast.success('Deleted');
+      toast.success('Moved to Recycle Bin');
     } catch (e: any) { toast.error(e.message); } finally { setDeleting(null); }
   };
 
