@@ -56,12 +56,14 @@ It's a single-user, privacy-first app: your data lives in **your** Supabase proj
 - **"Balance after" everywhere** — each transaction, income, fixed expense, and recurring-income row shows the affected account's resulting balance, bank-statement style.
 - **Powerful Transactions screen:** search · **multi-select** filters (type, category, account, owner — e.g. view expenses *and* savings together) · **flexible date range** (This Month, Last 3 Months, This Year, All Time, custom From→To) · **sortable** columns · **filtered totals** (count + per-type sums + grand total) · **selected-rows sum** · **pagination** (25–All, scales to years of data) · **bulk delete** · **duplicate-detection** warning · **quick-add** floating button.
 - **CSV import** wizard: drag-drop → map columns → date-format & signed-amount handling → preview → batched import, with dedup.
+- **Recycle bin** — deleting a transaction soft-deletes it; restore it any time from the Recycle Bin, or delete it permanently when you're sure.
+- **Offline-first logging** — add transactions with **no signal** (great while traveling); they're queued and **auto-sync on reconnect** (idempotent, no duplicates), with an offline/pending banner.
 
 ### 📈 Insight & planning
 - **Dashboard** with a **flexible period selector** (This Month, Last Month, Last 3 Months, This Year, Last Year, or a custom From→To range — view your finances for *any* span), live KPIs (Safe-to-Spend, Spendable, Savings, Investments, CC Outstanding, Net Cashflow, **Savings Rate**), **month-over-month deltas**, a **Net-Worth-over-time** chart, spend-by-category pie, and a 12-month trend.
 - **Income** screen with the same flexible date range + **multi-select** filters (category, source, owner) and live totals.
 - **Budgets** with **daily pacing** ("allowed till today") and a **projected month-end** forecast.
-- **Goals** with priority-based savings-pool allocation and affordability analysis.
+- **Goals** with **customizable allocation** (Auto by priority, or Manual per-goal), affordability analysis, and a **visual timeline** to each target date (a Now→Target bar with a projected-ready marker, green = on track / amber = behind).
 - **Reports** — monthly / yearly / custom range, category trends, CSV export.
 - **Alerts** — overspend, low/negative safe-to-spend, high CC, due bills — grouped by severity, with **24h snooze**.
 
@@ -81,7 +83,8 @@ It's a single-user, privacy-first app: your data lives in **your** Supabase proj
 ### 🧰 Platform
 - **Real-time sync** across tabs/devices (Supabase Realtime).
 - **Global search** across all data (button + `⌘/Ctrl-K`).
-- **PWA** — installable, works on mobile.
+- **In-app confirmation dialogs** (themed, with danger styling) — no jarring native browser pop-ups.
+- **PWA** — installable, works on mobile, offline-capable for logging spend.
 - **Onboarding wizard**, **session-expiry** handling, **JSON data export**, light/dark themes.
 - **Vitest** test suite for the accounting engine (33 tests — balances, budgets, currency conversion, account ledger, running balances, auto-processing).
 
@@ -295,6 +298,7 @@ Apply the files in `supabase/migrations/` **in order** via the Supabase SQL Edit
 | `007_income_recurring_unique` | Unique index preventing duplicate auto-posted income |
 | `008_multi_currency` | `accounts.currency` + `user_settings.exchange_rates` |
 | `009_enable_realtime` | Adds tables to the Realtime publication |
+| `010_recycle_bin` | `transactions.deleted_at` (soft delete) + active/deleted indexes |
 
 > All migrations are idempotent (`IF NOT EXISTS`). Every table is protected by **Row-Level Security** keyed to `auth.uid()`, so users only ever see their own data.
 
