@@ -212,8 +212,8 @@ export default function AlertsPage() {
           <Icon size={20} className={s.icon}/>
         </div>
         <div className="flex-1 min-w-0">
-          <p className="font-semibold text-sm" style={{ color:'var(--text-primary)' }}>{alert.title}</p>
-          <p className="text-sm mt-0.5" style={{ color:'var(--text-secondary)' }}>{alert.message}</p>
+          <p className="font-semibold text-sm break-words" style={{ color:'var(--text-primary)' }}>{alert.title}</p>
+          <p className="text-sm mt-0.5 break-words" style={{ color:'var(--text-secondary)' }}>{alert.message}</p>
         </div>
         <div className="flex-shrink-0 flex items-center gap-1.5 self-start">
           {alert.actionable && alert.action_link && (
@@ -292,12 +292,12 @@ export default function AlertsPage() {
       {visibleAlerts.length > 0 && (
         <div className="grid grid-cols-3 gap-3">
           {summaryChips.map(item => (
-            <div key={item.label} className="card card-p flex items-center gap-3">
-              <div className={`flex-shrink-0 w-11 h-11 rounded-full grid place-items-center ${item.style.iconWrap}`}>
+            <div key={item.label} className="card card-p min-w-0 flex items-center gap-2 sm:gap-3">
+              <div className={`flex-shrink-0 w-9 h-9 sm:w-11 sm:h-11 rounded-full grid place-items-center ${item.style.iconWrap}`}>
                 <item.Icon size={20} className={item.style.icon}/>
               </div>
               <div className="min-w-0">
-                <p className="kpi-label">{item.label}</p>
+                <p className="kpi-label truncate">{item.label}</p>
                 <p className={`text-2xl font-bold leading-none mt-1 ${item.style.icon}`}>{item.count}</p>
               </div>
             </div>
@@ -351,7 +351,7 @@ export default function AlertsPage() {
               {item.check
                 ? <span className="flex-shrink-0 w-6 h-6 rounded-full grid place-items-center bg-emerald-100 dark:bg-emerald-900/30"><CheckCircle size={14} className="text-emerald-600 dark:text-emerald-400"/></span>
                 : <span className="flex-shrink-0 w-6 h-6 rounded-full grid place-items-center bg-red-100 dark:bg-red-900/30"><XCircle size={14} className="text-red-600 dark:text-red-400"/></span>}
-              <span className={`text-sm flex-1 ${item.check ? '' : 'font-medium text-red-600 dark:text-red-400'}`} style={item.check ? { color:'var(--text-secondary)' } : undefined}>{item.label}</span>
+              <span className={`text-sm flex-1 min-w-0 break-words ${item.check ? '' : 'font-medium text-red-600 dark:text-red-400'}`} style={item.check ? { color:'var(--text-secondary)' } : undefined}>{item.label}</span>
               {!item.check && (
                 <Link href={item.link} className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline flex-shrink-0">Fix →</Link>
               )}

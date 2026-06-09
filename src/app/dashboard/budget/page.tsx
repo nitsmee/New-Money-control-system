@@ -157,10 +157,10 @@ export default function BudgetPage() {
           { label: 'On Track', value: null, badge: summary.onTrack, color: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-900/20' },
           { label: 'Projected Over Budget', value: null, badge: summary.projectedOverCount, color: summary.projectedOverCount > 0 ? 'text-red-500' : 'text-emerald-600', bg: summary.projectedOverCount > 0 ? 'bg-red-50 dark:bg-red-900/20' : 'bg-emerald-50 dark:bg-emerald-900/20' },
         ].map(item => (
-          <div key={item.label} className={`card card-p ${item.bg}`}>
-            <p className="kpi-label">{item.label}</p>
+          <div key={item.label} className={`card card-p min-w-0 ${item.bg}`}>
+            <p className="kpi-label truncate">{item.label}</p>
             {item.value !== null ? (
-              <p className={`kpi-value mt-1 ${item.color}`}>{formatCurrency(item.value, sym)}</p>
+              <p className={`kpi-value mt-1 break-words ${item.color}`}>{formatCurrency(item.value, sym)}</p>
             ) : (
               <p className={`text-3xl font-bold mt-1 ${item.color}`}>{item.badge}</p>
             )}
@@ -200,69 +200,71 @@ export default function BudgetPage() {
           const pct = bs.monthly_budget > 0 ? Math.min(100, (bs.actual_till_date / bs.monthly_budget) * 100) : 0;
           return (
             <div key={bs.category} className="card card-p group">
-              <div className="flex items-start justify-between mb-3">
-                <div>
+              <div className="flex items-start justify-between gap-2 mb-3">
+                <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    {bs.status === 'green' ? <CheckCircle size={15} className="text-emerald-500" /> : bs.status === 'red' ? <AlertTriangle size={15} className="text-red-500" /> : <TrendingUp size={15} className="text-amber-500" />}
-                    <h3 className="font-semibold text-sm">{bs.category}</h3>
+                    <span className="flex-shrink-0">
+                      {bs.status === 'green' ? <CheckCircle size={15} className="text-emerald-500" /> : bs.status === 'red' ? <AlertTriangle size={15} className="text-red-500" /> : <TrendingUp size={15} className="text-amber-500" />}
+                    </span>
+                    <h3 className="font-semibold text-sm truncate">{bs.category}</h3>
                   </div>
-                  {bs.budget_entry?.owner_purpose && <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{bs.budget_entry.owner_purpose}</p>}
+                  {bs.budget_entry?.owner_purpose && <p className="text-xs mt-0.5 truncate" style={{ color: 'var(--text-muted)' }}>{bs.budget_entry.owner_purpose}</p>}
                 </div>
-                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="flex gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
                   {bs.budget_entry && <button onClick={() => openEdit(bs.budget_entry!)} className="btn-icon text-slate-400 hover:text-blue-600"><Pencil size={13}/></button>}
                   {bs.budget_entry && <button onClick={() => handleDelete(bs.budget_entry!)} className="btn-icon text-slate-400 hover:text-red-600"><Trash2 size={13}/></button>}
                 </div>
               </div>
               <div className="space-y-2 text-xs mb-3" style={{ color: 'var(--text-secondary)' }}>
-                <div className="flex justify-between">
-                  <span>Monthly Budget</span>
-                  <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{formatCurrency(bs.monthly_budget, sym)}</span>
+                <div className="flex justify-between gap-2">
+                  <span className="min-w-0 truncate">Monthly Budget</span>
+                  <span className="font-semibold whitespace-nowrap flex-shrink-0" style={{ color: 'var(--text-primary)' }}>{formatCurrency(bs.monthly_budget, sym)}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span>Allowed till Day {bs.days_elapsed}</span>
-                  <span>{formatCurrency(bs.allowed_till_date, sym)}</span>
+                <div className="flex justify-between gap-2">
+                  <span className="min-w-0 truncate">Allowed till Day {bs.days_elapsed}</span>
+                  <span className="whitespace-nowrap flex-shrink-0">{formatCurrency(bs.allowed_till_date, sym)}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span>Actual Spent</span>
-                  <span className={`font-semibold ${bs.status === 'red' ? 'text-red-500' : bs.status === 'orange' ? 'text-amber-600' : 'text-emerald-600'}`}>{formatCurrency(bs.actual_till_date, sym)}</span>
+                <div className="flex justify-between gap-2">
+                  <span className="min-w-0 truncate">Actual Spent</span>
+                  <span className={`font-semibold whitespace-nowrap flex-shrink-0 ${bs.status === 'red' ? 'text-red-500' : bs.status === 'orange' ? 'text-amber-600' : 'text-emerald-600'}`}>{formatCurrency(bs.actual_till_date, sym)}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span>Remaining</span>
-                  <span className={bs.remaining_monthly < 0 ? 'text-red-500 font-bold' : 'text-emerald-600 font-medium'}>{formatCurrency(bs.remaining_monthly, sym)}</span>
+                <div className="flex justify-between gap-2">
+                  <span className="min-w-0 truncate">Remaining</span>
+                  <span className={`whitespace-nowrap flex-shrink-0 ${bs.remaining_monthly < 0 ? 'text-red-500 font-bold' : 'text-emerald-600 font-medium'}`}>{formatCurrency(bs.remaining_monthly, sym)}</span>
                 </div>
                 {bs.days_remaining > 3 && bs.monthly_budget > 0 && (
-                  <div className="flex justify-between items-center">
-                    <span>Projected Month-End</span>
-                    <span className="flex items-center gap-1">
-                      <span className={`font-semibold ${bs.projected_month_end > bs.monthly_budget ? 'text-red-500' : 'text-emerald-600'}`}>
+                  <div className="flex justify-between items-center gap-2">
+                    <span className="min-w-0 truncate">Projected Month-End</span>
+                    <span className="flex items-center gap-1 flex-shrink-0">
+                      <span className={`font-semibold whitespace-nowrap ${bs.projected_month_end > bs.monthly_budget ? 'text-red-500' : 'text-emerald-600'}`}>
                         {formatCurrency(bs.projected_month_end, sym)}
                       </span>
                       {bs.projected_month_end > bs.monthly_budget
-                        ? <span className="text-[10px] font-semibold text-red-500 bg-red-50 dark:bg-red-900/20 px-1 py-0.5 rounded">⚠ Over</span>
-                        : <span className="text-[10px] font-semibold text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20 px-1 py-0.5 rounded">✓ OK</span>
+                        ? <span className="text-[10px] font-semibold text-red-500 bg-red-50 dark:bg-red-900/20 px-1 py-0.5 rounded whitespace-nowrap">⚠ Over</span>
+                        : <span className="text-[10px] font-semibold text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20 px-1 py-0.5 rounded whitespace-nowrap">✓ OK</span>
                       }
                     </span>
                   </div>
                 )}
                 {bs.overspent > 0 && (
-                  <div className="flex justify-between text-red-500 font-medium">
-                    <span>Overspent</span>
-                    <span>{formatCurrency(bs.overspent, sym)}</span>
+                  <div className="flex justify-between gap-2 text-red-500 font-medium">
+                    <span className="min-w-0 truncate">Overspent</span>
+                    <span className="whitespace-nowrap flex-shrink-0">{formatCurrency(bs.overspent, sym)}</span>
                   </div>
                 )}
                 {bs.recovery_per_day > 0 && (
-                  <div className="flex justify-between text-amber-600">
-                    <span>Recovery needed</span>
-                    <span>{formatCurrency(bs.recovery_per_day, sym)}/day over {bs.days_remaining} days</span>
+                  <div className="flex justify-between gap-2 text-amber-600">
+                    <span className="flex-shrink-0">Recovery needed</span>
+                    <span className="min-w-0 text-right break-words">{formatCurrency(bs.recovery_per_day, sym)}/day over {bs.days_remaining} days</span>
                   </div>
                 )}
               </div>
               <div className="progress-bar">
                 <div className={`progress-fill ${bs.status === 'green' ? 'bg-emerald-500' : bs.status === 'red' ? 'bg-red-500' : 'bg-amber-500'}`} style={{ width: `${pct}%` }} />
               </div>
-              <div className="flex items-center justify-between mt-2">
-                <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{pct.toFixed(0)}% used</span>
-                <span className={`badge text-[10px] ${bs.status === 'green' ? 'badge-green' : bs.status === 'red' ? 'badge-red' : 'badge-yellow'}`}>
+              <div className="flex items-center justify-between gap-2 mt-2">
+                <span className="text-xs whitespace-nowrap" style={{ color: 'var(--text-muted)' }}>{pct.toFixed(0)}% used</span>
+                <span className={`badge text-[10px] flex-shrink-0 ${bs.status === 'green' ? 'badge-green' : bs.status === 'red' ? 'badge-red' : 'badge-yellow'}`}>
                   {bs.status === 'green' ? 'On Track' : bs.status === 'red' ? 'Over Budget' : 'Watch Out'}
                 </span>
               </div>

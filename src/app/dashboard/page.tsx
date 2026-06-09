@@ -182,6 +182,9 @@ export default function DashboardPage() {
   // category-spend pie. In monthly mode it's the selected month's bounds.
   const rangeStart = isMonthlyMode ? fmt(startOfMonth(new Date(selYear, selMonth - 1))) : fromDate;
   const rangeEnd = isMonthlyMode ? fmt(endOfMonth(new Date(selYear, selMonth - 1))) : toDate;
+  // An empty bound (user cleared a custom date) means "unbounded" — without this
+  // guard the pie/period filters compare against "" and return nothing.
+  const inRange = (d: string) => (!rangeStart || d >= rangeStart) && (!rangeEnd || d <= rangeEnd);
 
   // Human-readable label for the selected period (used in the subtitle).
   const periodLabel = isMonthlyMode
@@ -271,7 +274,7 @@ export default function DashboardPage() {
   // Category-spend pie follows the SELECTED period: the resolved from/to window
   // (custom/range mode) or the selected month's bounds (monthly mode) — one path.
   const catSpend = useMemo(() => getCategorySpend(
-    norm.transactions.filter(t => t.date >= rangeStart && t.date <= rangeEnd),
+    norm.transactions.filter(t => inRange(t.date)),
     categories.map(c => ({ name: c.name, color: c.color }))
   ), [norm.transactions, rangeStart, rangeEnd, categories]);
   const activeAlerts = useMemo(() => generateAlerts(budgetStatus, normBalances, displayFixedExpenses, settings ?? { safe_spend_buffer: 5000 } as any, sym), [budgetStatus, normBalances, displayFixedExpenses, settings, sym]);
@@ -321,7 +324,7 @@ export default function DashboardPage() {
   const investAcctIds = useMemo(() => new Set(investBalances.map(b => b.account.id)), [investBalances]);
   // Use normalized transactions so this nets cleanly against kpis.total_savings
   // (also normalized) when building the savings-vs-invested split.
-  const investedPeriod = useMemo(() => norm.transactions.filter(t => t.type === 'saving' && t.date >= rangeStart && t.date <= rangeEnd && t.to_account_id && investAcctIds.has(t.to_account_id)).reduce((s, t) => s + t.amount, 0), [norm.transactions, rangeStart, rangeEnd, investAcctIds]);
+  const investedPeriod = useMemo(() => norm.transactions.filter(t => t.type === 'saving' && inRange(t.date) && t.to_account_id && investAcctIds.has(t.to_account_id)).reduce((s, t) => s + t.amount, 0), [norm.transactions, rangeStart, rangeEnd, investAcctIds]);
   const savedPeriod = (kpis?.total_savings ?? 0) - investedPeriod;
 
   // For Safe-to-Spend, reserve only bank/cash-paid bills — card-charged ones

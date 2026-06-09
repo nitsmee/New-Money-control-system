@@ -12,7 +12,7 @@ import { CurrencySelect } from '@/components/CurrencySelect';
 type Tab = 'accounts'|'categories'|'owners'|'preferences';
 
 export default function SettingsPage() {
-  const { accounts, categories, owners, settings, addAccount, updateAccount, removeAccount, addCategory, updateCategory, removeCategory, addOwner, updateOwner, removeOwner, updateSettings, transactions, income, budgets, goals, fixedExpenses, recurringIncome } = useAppStore();
+  const { accounts, categories, owners, settings, addAccount, updateAccount, removeAccount, addCategory, updateCategory, removeCategory, addOwner, updateOwner, removeOwner, updateSettings, setTheme, transactions, income, budgets, goals, fixedExpenses, recurringIncome } = useAppStore();
   const [tab, setTab] = useState<Tab>('accounts');
   const sb = createClient();
   const sym = settings?.currency_symbol ?? '₹';
@@ -185,8 +185,10 @@ export default function SettingsPage() {
       if (error) throw error;
       updateSettings(data);
       document.documentElement.setAttribute('data-font', prefForm.font_choice);
-      if (prefForm.theme==='dark') document.documentElement.classList.add('dark');
-      else if (prefForm.theme==='light') document.documentElement.classList.remove('dark');
+      // Update the store theme (the single source of truth the layout applies
+      // and persists) — this makes the saved theme actually take effect AND
+      // survive a reload, and correctly handles 'system'.
+      setTheme(prefForm.theme);
       toast.success('Preferences saved');
     } catch (e:any) { toast.error(e.message); } finally { setSavingPrefs(false); }
   };
