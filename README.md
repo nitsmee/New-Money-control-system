@@ -10,7 +10,7 @@ A production-grade personal finance app for tracking income, expenses, budgets, 
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript)
 ![Supabase](https://img.shields.io/badge/Supabase-Postgres%20%2B%20Auth%20%2B%20RLS-3ecf8e?logo=supabase)
 ![Tailwind](https://img.shields.io/badge/Tailwind-CSS-38bdf8?logo=tailwindcss)
-![Tests](https://img.shields.io/badge/tests-30%20passing-22c55e?logo=vitest)
+![Tests](https://img.shields.io/badge/tests-33%20passing-22c55e?logo=vitest)
 ![PWA](https://img.shields.io/badge/PWA-installable-5a0fc8)
 
 </div>
@@ -52,15 +52,18 @@ It's a single-user, privacy-first app: your data lives in **your** Supabase proj
 - **7 transaction types** with correct accounting: Expense, Transfer, Saving, Credit-Card Payment, Initial Balance, Initial CC Outstanding, Adjustment.
 - **Credit-card logic** done right (outstanding goes up on spend, down on payment).
 - **Cross-currency transfers** credit the destination in *its* currency, converted via your rates.
-- **Powerful Transactions screen:** search · filter by category / account / owner / type · **flexible date range** (This Month, Last 3 Months, This Year, All Time, custom From→To) · **sortable** columns · **filtered totals** (count + per-type sums + grand total) · **selected-rows sum** · **pagination** (25–All, scales to years of data) · **bulk delete** · **duplicate-detection** warning · **quick-add** floating button.
+- **Account Statement** — click any account for a running-balance ledger (every entry, oldest→newest, with the balance after it) so you can verify *exactly* how today's number was reached — or flip to **Quick Add** to log an entry to that account.
+- **"Balance after" everywhere** — each transaction, income, fixed expense, and recurring-income row shows the affected account's resulting balance, bank-statement style.
+- **Powerful Transactions screen:** search · **multi-select** filters (type, category, account, owner — e.g. view expenses *and* savings together) · **flexible date range** (This Month, Last 3 Months, This Year, All Time, custom From→To) · **sortable** columns · **filtered totals** (count + per-type sums + grand total) · **selected-rows sum** · **pagination** (25–All, scales to years of data) · **bulk delete** · **duplicate-detection** warning · **quick-add** floating button.
 - **CSV import** wizard: drag-drop → map columns → date-format & signed-amount handling → preview → batched import, with dedup.
 
 ### 📈 Insight & planning
-- **Dashboard** with live KPIs (Safe-to-Spend, Spendable, Savings, Investments, CC Outstanding, Net Cashflow, **Savings Rate**), **month-over-month deltas**, a **Net-Worth-over-time** chart, spend-by-category pie, and a 12-month trend.
+- **Dashboard** with a **flexible period selector** (This Month, Last Month, Last 3 Months, This Year, Last Year, or a custom From→To range — view your finances for *any* span), live KPIs (Safe-to-Spend, Spendable, Savings, Investments, CC Outstanding, Net Cashflow, **Savings Rate**), **month-over-month deltas**, a **Net-Worth-over-time** chart, spend-by-category pie, and a 12-month trend.
+- **Income** screen with the same flexible date range + **multi-select** filters (category, source, owner) and live totals.
 - **Budgets** with **daily pacing** ("allowed till today") and a **projected month-end** forecast.
 - **Goals** with priority-based savings-pool allocation and affordability analysis.
 - **Reports** — monthly / yearly / custom range, category trends, CSV export.
-- **Alerts** — overspend, low/negative safe-to-spend, high CC, due bills — with **24h snooze**.
+- **Alerts** — overspend, low/negative safe-to-spend, high CC, due bills — grouped by severity, with **24h snooze**.
 
 ### 🔁 Automation
 - **Fixed expenses** (rent, EMIs, subscriptions) and **recurring income** (salary, rent received) auto-post each month on their due day — **idempotent** (never duplicates), with back-fill for missed months.
@@ -80,7 +83,7 @@ It's a single-user, privacy-first app: your data lives in **your** Supabase proj
 - **Global search** across all data (button + `⌘/Ctrl-K`).
 - **PWA** — installable, works on mobile.
 - **Onboarding wizard**, **session-expiry** handling, **JSON data export**, light/dark themes.
-- **Vitest** test suite for the accounting engine (30 tests).
+- **Vitest** test suite for the accounting engine (33 tests — balances, budgets, currency conversion, account ledger, running balances, auto-processing).
 
 ---
 
@@ -302,11 +305,11 @@ Apply the files in `supabase/migrations/` **in order** via the Supabase SQL Edit
 The money-critical engine (`src/lib/utils/calculations.ts`, `autoProcess.ts`) is covered by **Vitest**:
 
 ```bash
-npm test          # run once  (30 tests)
+npm test          # run once  (33 tests)
 npm run test:watch
 ```
 
-Covers currency conversion, account-balance sign conventions, cross-currency transfers, budget pacing, goal analysis, leap-year due-date clamping, and auto-process idempotency.
+Covers currency conversion, account-balance sign conventions, cross-currency transfers, budget pacing, goal analysis, the **account ledger + running balances** (final running balance provably equals the computed balance), leap-year due-date clamping, and auto-process idempotency.
 
 ---
 
