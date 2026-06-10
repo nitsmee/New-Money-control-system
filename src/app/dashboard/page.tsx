@@ -68,9 +68,9 @@ function useCountUp(target: number, duration = 650) {
   return val;
 }
 
-function Amount({ value, sym, className }: { value: number; sym: string; className?: string }) {
+function Amount({ value, sym, className, style }: { value: number; sym: string; className?: string; style?: React.CSSProperties }) {
   const v = useCountUp(value);
-  return <span className={className}>{formatCurrency(Math.round(v), sym)}</span>;
+  return <span className={className} style={style}>{formatCurrency(Math.round(v), sym)}</span>;
 }
 
 interface DetailRow { label: string; amount: number; sign?: '+' | '-'; }
@@ -406,6 +406,20 @@ export default function DashboardPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, recurringIncome.length]);
 
+  // Sparkline for the net-worth hero (SVG points scaled to a fixed box).
+  const heroSpark = useMemo(() => {
+    const vals = netWorthTrend.map(d => d.netWorth);
+    if (vals.length < 2) return null;
+    const min = Math.min(...vals), max = Math.max(...vals);
+    const W = 210, H = 56, pad = 7, span = (max - min) || 1;
+    const pts = vals.map((v, i) => {
+      const x = (i / (vals.length - 1)) * W;
+      const y = H - pad - ((v - min) / span) * (H - pad * 2);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    });
+    return { W, H, line: pts.join(' '), area: `${pts.join(' ')} ${W},${H} 0,${H}` };
+  }, [netWorthTrend]);
+
   if (isLoading) return <LoadingSkeleton />;
 
   // Net-cashflow breakdown rows — savings split out from investments.
@@ -590,6 +604,40 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* Net-worth hero */}
+      <div
+        className="relative overflow-hidden rounded-2xl p-5 sm:p-6 animate-fade-in-up"
+        style={{ backgroundImage: 'linear-gradient(135deg, #4f46e5, #7c3aed 55%, #2563eb)', boxShadow: '0 16px 32px -16px rgba(79,70,229,0.6)', color: '#fff' }}
+      >
+        <span className="absolute pointer-events-none" style={{ top: -70, right: -30, width: 250, height: 250, borderRadius: 999, background: 'rgba(255,255,255,0.12)' }} />
+        <div className="relative z-10 flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <p className="text-xs uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.85)' }}>Net worth</p>
+            <Amount value={netWorth} sym={sym} className="block text-3xl sm:text-4xl font-bold tracking-tight mt-0.5" style={{ color: '#fff' }} />
+            <div className="flex gap-6 sm:gap-8 mt-4 flex-wrap">
+              <div>
+                <p className="text-[11px] uppercase tracking-wide" style={{ color: 'rgba(255,255,255,0.8)' }}>Income</p>
+                <p className="text-sm sm:text-base font-bold mt-0.5">{formatCurrency(kpis?.total_income ?? 0, sym)}</p>
+              </div>
+              <div>
+                <p className="text-[11px] uppercase tracking-wide" style={{ color: 'rgba(255,255,255,0.8)' }}>Spent</p>
+                <p className="text-sm sm:text-base font-bold mt-0.5">{formatCurrency(kpis?.total_expense ?? 0, sym)}</p>
+              </div>
+              <div>
+                <p className="text-[11px] uppercase tracking-wide" style={{ color: 'rgba(255,255,255,0.8)' }}>Savings rate</p>
+                <p className="text-sm sm:text-base font-bold mt-0.5">{savingsRate.toFixed(0)}%</p>
+              </div>
+            </div>
+          </div>
+          {heroSpark && (
+            <svg width={heroSpark.W} height={heroSpark.H} viewBox={`0 0 ${heroSpark.W} ${heroSpark.H}`} className="hidden sm:block flex-shrink-0 self-center" style={{ opacity: 0.95 }}>
+              <polygon fill="rgba(255,255,255,0.15)" points={heroSpark.area} />
+              <polyline fill="none" stroke="rgba(255,255,255,0.92)" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" points={heroSpark.line} />
+            </svg>
+          )}
+        </div>
+      </div>
+
       {/* Alerts */}
       {activeAlerts.length > 0 && (
         <div className="space-y-2">
@@ -648,20 +696,24 @@ export default function DashboardPage() {
               key={c.label}
               onClick={() => setDetail(c.detail)}
               className="card p-4 text-left w-full relative group overflow-hidden transition-all duration-200 hover:-translate-y-1 hover:shadow-xl active:scale-[0.99] animate-fade-in-up"
-              style={{ animationDelay: `${i * 40}ms` }}
+              style={{
+                animationDelay: `${i * 40}ms`,
+                background: accent ? `color-mix(in srgb, ${accent.color} 12%, var(--bg-surface))` : undefined,
+                borderColor: accent ? `color-mix(in srgb, ${accent.color} 28%, var(--border-default))` : undefined,
+              }}
             >
-              {/* Subtle accent strip on the left edge */}
-              {accent && <span className="absolute left-0 top-0 bottom-0 w-1 rounded-l-xl" style={{ background: accent.color, opacity: 0.85 }} />}
-              <Info size={14} className="absolute top-3 right-3 text-slate-300 group-hover:text-blue-500 transition-colors" />
+              {/* Accent strip on the left edge */}
+              {accent && <span className="absolute left-0 top-0 bottom-0 w-1 rounded-l-xl" style={{ background: accent.color }} />}
+              <Info size={14} className="absolute top-3 right-3 opacity-40 group-hover:opacity-100 transition-opacity" style={{ color: accent?.color ?? 'var(--text-muted)' }} />
               <div className="flex items-center gap-2">
                 {AccentIcon && (
-                  <span className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: `${accent.color}1a`, color: accent.color }}>
+                  <span className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: `${accent.color}24`, color: accent.color }}>
                     <AccentIcon size={15} />
                   </span>
                 )}
                 <div className="text-xs sm:text-sm truncate" style={{ color: 'var(--text-secondary)' }}>{c.label}</div>
               </div>
-              <Amount value={c.value} sym={sym} className={`block text-xl sm:text-2xl font-bold mt-1.5 ${toneClass(c.tone)}`} />
+              <Amount value={c.value} sym={sym} className="block text-xl sm:text-2xl font-bold mt-1.5" style={{ color: accent ? accent.color : 'var(--text-primary)' }} />
               <div className="text-[11px] sm:text-xs mt-1" style={{ color: 'var(--text-muted)' }}>{c.sub}</div>
               {showDelta && momDelta !== null && (
                 <div className={`text-xs mt-1.5 font-medium ${deltaGood ? 'text-emerald-600' : 'text-red-500'}`}>
@@ -675,11 +727,15 @@ export default function DashboardPage() {
         {/* Savings Rate KPI card */}
         <div
           className="card p-4 text-left w-full relative overflow-hidden animate-fade-in-up"
-          style={{ animationDelay: `${allCards.length * 40}ms` }}
+          style={{
+            animationDelay: `${allCards.length * 40}ms`,
+            background: 'color-mix(in srgb, #14b8a6 12%, var(--bg-surface))',
+            borderColor: 'color-mix(in srgb, #14b8a6 28%, var(--border-default))',
+          }}
         >
-          <span className="absolute left-0 top-0 bottom-0 w-1 rounded-l-xl" style={{ background: '#14b8a6', opacity: 0.85 }} />
+          <span className="absolute left-0 top-0 bottom-0 w-1 rounded-l-xl" style={{ background: '#14b8a6' }} />
           <div className="flex items-center gap-2">
-            <span className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: '#14b8a61a', color: '#14b8a6' }}>
+            <span className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: '#14b8a624', color: '#14b8a6' }}>
               <Percent size={15} />
             </span>
             <div className="text-xs sm:text-sm truncate" style={{ color: 'var(--text-secondary)' }}>Savings Rate</div>
