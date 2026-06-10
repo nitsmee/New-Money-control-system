@@ -47,3 +47,7 @@ Thumbs.db
 
 # Testing
 coverage/
+
+# Local design-preview scaffolding (not part of the app)
+.preview/
+.claude/
