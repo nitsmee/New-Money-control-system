@@ -2,9 +2,9 @@
 
 # 💸 Money Control System
 
-### Your money, fully understood — multi-currency personal finance with an AI assistant.
+### Your money, fully understood — a multi‑currency personal‑finance app with a built‑in AI assistant.
 
-A production-grade personal finance app for tracking income, expenses, budgets, credit cards, savings goals, and recurring payments — with **proper double‑entry accounting**, **per‑account multi‑currency**, **real‑time sync**, an **AI Finance Bot**, and an installable **PWA**.
+Track income, spending, credit cards, savings goals and recurring bills — with **bank‑style running balances**, **per‑account multi‑currency**, **real‑time sync**, an **AI Finance Bot**, and an installable **mobile app (PWA)**.
 
 ![Next.js](https://img.shields.io/badge/Next.js-14-black?logo=next.js)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript)
@@ -17,76 +17,190 @@ A production-grade personal finance app for tracking income, expenses, budgets, 
 
 ---
 
-## 📑 Table of contents
+## 📖 In plain English
 
-- [Why this app](#-why-this-app)
-- [Feature highlights](#-feature-highlights)
-- [Tech stack](#-tech-stack)
-- [Architecture](#-architecture)
-- [How data flows](#-how-data-flows)
-- [Key flows (diagrams)](#-key-flows)
-- [Multi-currency, explained](#-multi-currency-explained)
-- [The Finance Bot](#-the-finance-bot)
-- [Getting started](#-getting-started)
-- [Database & migrations](#-database--migrations)
-- [Testing](#-testing)
-- [Deployment](#-deployment)
-- [Project structure](#-project-structure)
-- [Scripts](#-scripts)
-- [Roadmap](#-roadmap)
+Think of this app as **your own private bank dashboard**.
+
+- You create **Accounts** — your bank, cash wallet, credit cards, a savings pot, an investment (SIP) account, even a family member's money.
+- You log **money in** (salary, refunds) and **money out** (spending, bills, transfers, card payments).
+- The app keeps a **running balance for every account** — exactly like a bank statement — so you always know how much you really have and *how you got there*.
+- It then turns all that into a colourful **Dashboard** (net worth, what's safe to spend, savings rate), **Budgets** that warn you *before* you overspend, **Goals** that tell you if you can afford that laptop yet, and **Reports**.
+- A friendly **🤖 Finance Bot** can answer questions about your own money in plain language ("how much did I spend last Sunday?", "can I afford a ₹1.5L bike?").
+
+Everything lives in **your own** private database. It works on your **phone**, in **light or dark mode**, and even **offline** (it syncs when you reconnect).
 
 ---
 
-## ✨ Why this app
+## 🧭 A 2‑minute tour — with real numbers
 
-Most free trackers just relabel a currency symbol and call it "multi-currency." This one actually **holds each account in its own currency and converts on the fly** — built for someone who earns and spends across countries (e.g. India ↔ Thailand). On top of that it has a genuinely useful **AI assistant** that reads your real numbers, **budget pacing** that warns before you overspend, and **real-time sync** so every tab and device stays in step.
+Here's the whole app in one story. Say you start fresh:
 
-It's a single-user, privacy-first app: your data lives in **your** Supabase project, protected by row-level security, and the AI bot runs **locally** unless you opt into a (free) LLM key.
+| # | What you do | Where | Effect on balances |
+|---|---|---|---|
+| 1 | Set opening balance **₹10,000** on **My SBI** | Add Transaction → *Initial Balance* | SBI = **₹10,000** |
+| 2 | Salary **₹50,000** lands in SBI | Income page | SBI = **₹60,000** |
+| 3 | Pay **₹1,415** for internet | Add Transaction → *Expense* | SBI = **₹58,585** |
+| 4 | Move **₹15,000** to your **SIP** | *Saving* (SBI → SIP) | SBI = **₹43,585**, SIP = **₹15,000** |
+| 5 | Move **₹26,981** to **Savings** | *Transfer* (SBI → Savings) | SBI = **₹16,604**, Savings = **₹26,981** |
+| 6 | Pay **₹3,576** Axis credit‑card bill | *Credit‑Card Payment* (SBI → Axis CC) | SBI = **₹13,028**, Axis CC owed = **₹3,576** |
+
+Now the app shows you:
+
+- **Account balances** → SBI ₹13,028 · Savings ₹26,981 · SIP ₹15,000 · Axis CC −₹3,576 owed.
+- **Net worth** = cash + savings + investments − card debt = `13,028 + 26,981 + 15,000 − 3,576` = **₹51,433**.
+- The **Transactions** list shows each line above (the **salary appears as a green `+₹50,000` row**), and every row prints the **balance *after* it** — so you can trace SBI from ₹10,000 all the way down to ₹13,028, just like a passbook.
+- **Budgets** track your spending categories; **Goals** tell you a ₹1,00,000 laptop is affordable now but a ₹16,00,000 car is not yet.
+
+> 💡 **Why a balance sometimes "jumps up":** income (like that ₹50,000 salary) is money *in*, so it raises the balance. Income shows on the **Income** page **and** as a green row in **Transactions**, so the running balance always reconciles top‑to‑bottom.
+
+---
+
+## 🧱 Core concepts (the building blocks)
+
+### Accounts
+Each account has its **own currency** and a **type** that gives it a colour across the app:
+
+| Type | Colour | Examples |
+|---|---|---|
+| 🟢 Cash / Bank | emerald | My SBI, Cash wallet |
+| 🔵 Savings | blue | Savings pot |
+| 🟣 Investment | violet | SIP, mutual funds |
+| 🟡 Family | amber | A parent's money you track |
+| 🔴 Credit card | rose | Axis CC, ICICI CC (shows *Outstanding* owed) |
+
+Click any account to open its **Statement** (full running‑balance ledger) or **Quick Add** an entry to it.
+
+### The 7 transaction types — and exactly what each does
+
+This is the heart of the app. Every entry adjusts balances in a predictable, bank‑correct way:
+
+| Type | "From" account | "To" account | Use it for |
+|---|---|---|---|
+| **Expense** | − amount  *(credit card: **+** what you owe)* | — | Buying things, bills |
+| **Income** *(on the Income page)* | — | **+** amount | Salary, refunds, rent received |
+| **Transfer** | − amount | **+** amount | Moving cash between your own accounts |
+| **Saving** | − amount | **+** amount (savings/investment) | Putting money aside / investing |
+| **Credit‑Card Payment** | − amount (bank) | − amount owed (card) | Paying your card bill (bank ↓, debt ↓) |
+| **Initial Balance** | — | sets the starting amount | The opening balance of a normal account |
+| **Initial CC Outstanding** | + amount owed (card) | — | The balance you already owe on a card |
+| **Adjustment** | − amount | **+** amount | Manual correction to fix a balance |
+
+> Credit cards are handled correctly: **spending raises** what you owe, **paying lowers** it — and a paid‑off card shows **₹0**, never a weird negative.
+
+### Income vs Recurring Income vs Fixed Expenses
+- **Income** — money coming in, logged on the Income page (also shown in Transactions).
+- **Recurring Income** — a *template* (e.g. "Salary on the 1st") that **auto‑creates** an income entry each month.
+- **Fixed Expenses** — templates for rent, EMIs, subscriptions that **auto‑post** each month on their due day.
+
+Both auto‑post **idempotently** (they can never create a duplicate) and back‑fill any months you missed.
+
+### Budgets, Goals, Reports & Alerts
+- **Budgets** — set a monthly limit per category; the app paces it ("allowed till today") and forecasts your **projected month‑end**, flagging *Over / On‑track*.
+- **Goals** — set a target (e.g. a ₹1L laptop); it tells you if you can **afford it now**, how much is allocated, and a **timeline** to the target date.
+- **Reports** — Monthly / Yearly / Custom range, with category charts, closing balances and CSV export.
+- **Alerts** — overspending, low "safe‑to‑spend", high card debt, due bills — grouped by severity, snooze‑able.
 
 ---
 
 ## 🚀 Feature highlights
 
 ### 💰 Accounts & transactions
-- **Per-account currency** (INR, THB, USD, …) — each account holds its own.
-- **7 transaction types** with correct accounting: Expense, Transfer, Saving, Credit-Card Payment, Initial Balance, Initial CC Outstanding, Adjustment.
-- **Credit-card logic** done right (outstanding goes up on spend, down on payment).
-- **Cross-currency transfers** credit the destination in *its* currency, converted via your rates.
-- **Account Statement** — click any account for a running-balance ledger (every entry, oldest→newest, with the balance after it) so you can verify *exactly* how today's number was reached — or flip to **Quick Add** to log an entry to that account.
-- **"Balance after" everywhere** — each transaction, income, fixed expense, and recurring-income row shows the affected account's resulting balance, bank-statement style.
-- **Powerful Transactions screen:** search · **multi-select** filters (type, category, account, owner — e.g. view expenses *and* savings together) · **flexible date range** (This Month, Last 3 Months, This Year, All Time, custom From→To) · **sortable** columns · **filtered totals** (count + per-type sums + grand total) · **selected-rows sum** · **pagination** (25–All, scales to years of data) · **bulk delete** · **duplicate-detection** warning · **quick-add** floating button.
-- **CSV import** wizard: drag-drop → map columns → date-format & signed-amount handling → preview → batched import, with dedup.
-- **Recycle bin** — deleting a transaction soft-deletes it; restore it any time from the Recycle Bin, or delete it permanently when you're sure.
-- **Offline-first logging** — add transactions with **no signal** (great while traveling); they're queued and **auto-sync on reconnect** (idempotent, no duplicates), with an offline/pending banner.
+- **Per‑account currency** (INR, THB, USD…) — each account holds its own; balances show in that native currency.
+- **7 transaction types** with correct accounting (see table above), including proper **credit‑card** behaviour and **cross‑currency transfers**.
+- **Account Statement** — a running‑balance ledger (oldest → newest, with the balance after every entry) so you can verify *exactly* how today's number was reached. Opens as a **centered pop‑up**.
+- **"Balance after" everywhere** — every transaction, income and recurring row shows the affected account's resulting balance, passbook‑style.
+- **Income shown in Transactions** — money‑in rows appear (green `+`) alongside spending, so the list and balances always reconcile.
+- **Powerful Transactions screen** — search · **multi‑select** filters (type, category, account, owner) · flexible date range (This Month → custom From→To) · sortable columns · **soft‑tint summary cards** (income/expense/savings/CC/transfers/total) · selected‑rows sum · pagination · bulk delete · duplicate detection · quick‑add button.
+- **CSV import** wizard (map columns → preview → batched import, with dedup).
+- **Recycle bin** — deletes are soft; restore any time, or remove permanently.
+- **Offline‑first logging** — add entries with no signal; they queue and **auto‑sync on reconnect** (no duplicates).
 
 ### 📈 Insight & planning
-- **Dashboard** with a **flexible period selector** (This Month, Last Month, Last 3 Months, This Year, Last Year, or a custom From→To range — view your finances for *any* span), live KPIs (Safe-to-Spend, Spendable, Savings, Investments, CC Outstanding, Net Cashflow, **Savings Rate**), **month-over-month deltas**, a **Net-Worth-over-time** chart, spend-by-category pie, and a 12-month trend.
-- **Income** screen with the same flexible date range + **multi-select** filters (category, source, owner) and live totals.
-- **Budgets** with **daily pacing** ("allowed till today") and a **projected month-end** forecast.
-- **Goals** with **customizable allocation** (Auto by priority, or Manual per-goal), affordability analysis, and a **visual timeline** to each target date (a Now→Target bar with a projected-ready marker, green = on track / amber = behind).
-- **Reports** — monthly / yearly / custom range, category trends, CSV export.
-- **Alerts** — overspend, low/negative safe-to-spend, high CC, due bills — grouped by severity, with **24h snooze**.
+- **Dashboard** — a net‑worth **hero** (with sparkline + income/spent/savings‑rate), colourful KPI cards (Safe‑to‑Spend, Spendable, Savings, Investments, CC Outstanding, Net Cashflow, Savings Rate), month‑over‑month deltas, a **Net‑Worth‑over‑time** chart, category pie, 12‑month trend, and **Recent Activity** (transactions + income).
+- **Budgets / Goals / Reports / Alerts** as described above.
 
-### 🔁 Automation
-- **Fixed expenses** (rent, EMIs, subscriptions) and **recurring income** (salary, rent received) auto-post each month on their due day — **idempotent** (never duplicates), with back-fill for missed months.
-- **Payday sweep** option moves last month's leftover into savings.
-
-### 🌏 Multi-currency
-- Free **auto-fetched exchange rates** (no API key) + manual override.
-- A **display-currency switch** to view all totals in INR or THB (or anything).
-- **Searchable** currency picker; rates list stays clean (only currencies you use).
+### 🌏 Multi‑currency
+- Free **auto‑fetched exchange rates** (no key) + manual override.
+- A **display‑currency switch** to view all totals in INR, THB, etc. — without changing stored data.
 
 ### 🤖 AI Finance Bot
-- Understands natural questions about **your** data: *"how much did I spend last Sunday?"*, *"can I afford a bike for ₹1.5 lakh?"*, *"convert ฿5000 to rupees"*, *"explain my safe-to-spend"*.
-- **Free by default** (local engine). Optionally plug a **free Groq or Gemini key** for full open-ended chat.
+- Answers natural questions about **your** data, converts currencies, checks affordability, explains any number — **free & local** by default; plug a free Groq/Gemini key for open‑ended chat.
 
-### 🧰 Platform
-- **Real-time sync** across tabs/devices (Supabase Realtime).
-- **Global search** across all data (button + `⌘/Ctrl-K`).
-- **In-app confirmation dialogs** (themed, with danger styling) — no jarring native browser pop-ups.
-- **PWA** — installable, works on mobile, offline-capable for logging spend.
-- **Onboarding wizard**, **session-expiry** handling, **JSON data export**, light/dark themes.
-- **Vitest** test suite for the accounting engine (33 tests — balances, budgets, currency conversion, account ledger, running balances, auto-processing).
+### 🎨 Platform & design
+- **One cohesive theme** across every page — light **soft‑tint** cards in the account‑type colours, working in **light *and* dark mode**.
+- **Real‑time sync** across tabs/devices · **global search** (`⌘/Ctrl‑K`) · themed in‑app confirmation dialogs · **PWA** (installable, mobile, offline) · onboarding wizard · JSON export.
+- **Vitest** suite (33 tests) covering the money engine.
+
+---
+
+## 🔀 How your data flows
+
+```mermaid
+sequenceDiagram
+    participant U as You
+    participant P as Page
+    participant S as Zustand store (in‑memory cache)
+    participant DB as Supabase (Postgres + RLS)
+    participant RT as Realtime
+
+    U->>P: Sign in
+    P->>S: loadAll(userId)
+    S->>DB: fetch accounts, transactions, income, budgets, goals…
+    DB-->>S: your rows only (Row‑Level Security)
+    Note over S,P: Every page renders from the store (fast, offline‑friendly)
+
+    U->>P: Add / edit / delete an entry
+    P->>S: optimistic update (instant UI)
+    P->>DB: insert / update / delete
+    DB-->>RT: change event
+    RT-->>S: other tabs/devices refresh
+```
+
+1. **Login → `loadAll`** pulls all *your* rows (RLS keeps users isolated) into one in‑memory store.
+2. **Pages are pure views** of that store — no per‑page fetching.
+3. **Mutations are optimistic** — the UI updates instantly, then saves to Supabase.
+4. **Realtime** keeps every open device in sync.
+
+### How a balance is computed (the important part)
+
+```mermaid
+flowchart TD
+    T["A transaction or income<br/>(amount in its account's currency)"] --> RAW["calculateAccountBalances() / accountLedger()"]
+    RAW --> NATIVE["Per‑account running balance<br/>in the account's own currency"]
+    T --> NORM["normalizeAmounts()<br/>convert each amount → display currency"]
+    NORM --> KPI["calculateDashboardKPIs() · budgets · trends"]
+    KPI --> TOTALS["Dashboard totals<br/>in your display currency"]
+```
+
+Every income + transaction is sorted by date, then each one adds/subtracts from the right account. The **last value is the current balance** — and the unit tests prove the ledger's final running balance always equals the computed balance.
+
+---
+
+## 🌏 Multi‑currency, explained (with an example)
+
+- **Base currency** = `Settings → Preferences` (e.g. INR). Everything converts relative to it.
+- Each **account has its own currency**; rates are stored as *"value of 1 unit in the base currency"*.
+- A **display‑currency switch** recomputes totals into whatever you want to *view* in — stored data never changes.
+
+> **Example:** base = INR, you have a ฿ (THB) cash account. Spend **฿500** → stored as 500 THB. The dashboard in INR shows ≈ **₹1,190**; flip the display to THB and the same spend shows **฿500**. Your INR accounts are untouched.
+
+---
+
+## 🤖 The Finance Bot
+
+A floating assistant that **reads your real numbers**.
+
+**Free, no setup (local engine):** data questions ("biggest expense in June", "balance of all accounts", "my savings rate"), currency conversion, affordability ("can I afford a car for ₹8 lakh?"), and app how‑tos.
+
+**Optional open‑ended chat (bring a free key):** set **one** of these env vars and the bot routes richer questions to that LLM with a snapshot of your finances (free providers first):
+
+```bash
+GROQ_API_KEY=gsk_...          # free — console.groq.com   (recommended)
+GEMINI_API_KEY=AIza...        # free — aistudio.google.com
+ANTHROPIC_API_KEY=sk-ant-...  # paid — console.anthropic.com
+```
+
+No key → it stays fully local and free. 🔒 It will **never** reveal passwords/secrets, and it's a *money* assistant — it won't tell you the weather. 🙂
 
 ---
 
@@ -98,188 +212,32 @@ It's a single-user, privacy-first app: your data lives in **your** Supabase proj
 | Language | **TypeScript** (strict) |
 | Styling | **Tailwind CSS** + CSS variables (light/dark) |
 | State | **Zustand** |
-| Backend | **Supabase** — Postgres, Auth, Row-Level Security, Realtime |
-| Charts | **Recharts** |
-| Dates | **date-fns** |
-| CSV | **PapaParse** |
-| Icons / UI | **lucide-react**, **Radix UI**, **framer-motion** |
-| Notifications | **react-hot-toast** |
-| PWA | **next-pwa** |
-| Tests | **Vitest** |
-| AI (optional) | **Groq** / **Google Gemini** / **Anthropic** via a server route |
-
----
-
-## 🏗 Architecture
-
-```mermaid
-flowchart LR
-    subgraph Browser["🌐 Browser (Next.js client)"]
-        UI["Dashboard · Transactions · Budgets · Goals · Reports · Settings"]
-        Store["Zustand store<br/>(in-memory cache of all your data)"]
-        Bot["🤖 Finance Bot<br/>(local query engine)"]
-        UI <--> Store
-        Bot --> Store
-    end
-
-    subgraph Edge["▲ Next.js server (Vercel)"]
-        FX["/api/fx<br/>free exchange rates"]
-        BotAPI["/api/finance-bot<br/>optional LLM fallback"]
-    end
-
-    subgraph Supabase["🟢 Supabase"]
-        DB[("Postgres<br/>+ Row-Level Security")]
-        Auth["Auth"]
-        RT["Realtime"]
-    end
-
-    Store -- "read / write (RLS)" --> DB
-    Auth --> Browser
-    RT -- "live change events" --> Store
-    Bot -- "open-ended Q (if key set)" --> BotAPI
-    BotAPI -- "Groq / Gemini / Claude" --> LLM["LLM provider"]
-    Store --> FX
-    FX --> Provider["open.er-api.com"]
-```
-
-**Principle:** the client loads the user's data once into an in-memory store, renders everything from it (fast, offline-friendly), and writes back to Postgres. Supabase Realtime pushes changes from other devices back into the store. The two server routes are thin, optional helpers (rates + AI).
-
----
-
-## 🔀 How data flows
-
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant P as Page
-    participant S as Zustand store
-    participant DB as Supabase (Postgres + RLS)
-    participant RT as Realtime
-
-    U->>P: Sign in
-    P->>S: loadAll(userId)
-    S->>DB: fetch accounts, transactions, income, budgets, goals…
-    DB-->>S: rows (this user only, via RLS)
-    Note over S,P: Every page renders reactively from the store
-
-    U->>P: Add / edit / delete an entry
-    P->>S: optimistic update (instant UI)
-    P->>DB: insert / update / delete
-    DB-->>RT: change event
-    RT-->>S: debounced reload → other tabs/devices update
-```
-
-1. **Login → `loadAll`** pulls all of *your* rows (RLS guarantees isolation) into the store.
-2. **Pages are pure views** of the store — no per-page fetching.
-3. **Mutations are optimistic**: the UI updates immediately, then persists to Supabase.
-4. **Realtime** keeps every open tab/device in sync (debounced full refresh).
-
----
-
-## 🧭 Key flows
-
-<details open>
-<summary><b>1) A transaction becomes a balance & a KPI (with multi-currency)</b></summary>
-
-```mermaid
-flowchart TD
-    T["Transaction<br/>(amount in its account's currency)"] --> RAW["calculateAccountBalances()"]
-    RAW --> NATIVE["Per-account balance<br/>shown in the account's own currency"]
-
-    T --> NORM["normalizeAmounts()<br/>convert every amount → display currency"]
-    NORM --> KPI["calculateDashboardKPIs()<br/>calculateBudgetStatus() · trends"]
-    KPI --> TOTALS["Aggregate totals<br/>shown in the display currency"]
-```
-
-*Native per-account amounts stay untouched; only aggregate roll-ups are converted — so totals are correct even across INR + THB accounts.*
-</details>
-
-<details>
-<summary><b>2) Auto-processing recurring items (idempotent)</b></summary>
-
-```mermaid
-flowchart TD
-    Load["Dashboard loads"] --> Due{"Any fixed expense /<br/>recurring income due<br/>and not yet posted?"}
-    Due -- No --> Skip["Do nothing"]
-    Due -- Yes --> Check["getDueOccurrences()<br/>vs existing periods"]
-    Check --> Post["Insert the missing month(s)<br/>(unique index prevents duplicates)"]
-    Post --> Update["Update last_processed_period"]
-    Update --> Refresh["Store refreshes → balances update"]
-```
-</details>
-
-<details>
-<summary><b>3) How the Finance Bot answers</b></summary>
-
-```mermaid
-flowchart TD
-    Q["Your question"] --> Sec{"Asks for a<br/>password/secret?"}
-    Sec -- Yes --> Refuse["🔒 Politely refuse"]
-    Sec -- No --> Local{"Precise data query?<br/>(counts, sums, balances,<br/>savings, currency, dates)"}
-    Local -- Yes --> Exact["Answer instantly & locally<br/>(exact math on your data)"]
-    Local -- No --> Key{"LLM key configured?"}
-    Key -- Yes --> LLM["Send rich financial snapshot<br/>to Groq / Gemini / Claude"]
-    Key -- No --> KB["Local knowledge base<br/>+ capability hints"]
-```
-</details>
-
----
-
-## 🌏 Multi-currency, explained
-
-- Your **base currency** = `Settings → Preferences → Base Currency` (e.g. INR). Everything converts *relative to* it.
-- Each **account has its own currency**. Balances on account lists show that native currency.
-- **Exchange rates** are stored as *"value of 1 unit in the base currency"* (base = 1). Fetch them free with **"Update rates automatically"**, or set them by hand. Only the currencies you actually use are kept.
-- A **display-currency switch** (on the dashboard) recomputes all aggregate totals into whatever currency you want to *view* in — without changing stored data.
-
-> Example: base = INR, you have a ฿ (THB) cash account. Spend ฿500 → stored as 500 THB. The dashboard, viewed in INR, shows ≈ ₹1,190; switch the display to THB and it shows ฿500.
-
----
-
-## 🤖 The Finance Bot
-
-The bot is a floating assistant that **reads your real data**.
-
-**Free, no setup (local engine):** data questions ("how many transactions last week", "biggest expense in June", "balance of all accounts", "my savings"), currency conversion, affordability ("can I afford a car for ₹8 lakh?"), calculation explanations, and app how-tos.
-
-**Optional open-ended chat (bring a free key):** set **one** of these as an environment variable and the bot routes open-ended questions to that LLM with a full snapshot of your finances (tried in this order — free first):
-
-```bash
-GROQ_API_KEY=gsk_...        # free tier — console.groq.com   (recommended)
-GEMINI_API_KEY=AIza...      # free tier — aistudio.google.com
-ANTHROPIC_API_KEY=sk-ant-... # paid — console.anthropic.com
-```
-
-No key → it stays fully local and free. It's a *money* assistant — it won't tell you the weather. 🙂
+| Backend | **Supabase** — Postgres, Auth, Row‑Level Security, Realtime |
+| Charts | **Recharts** · Dates **date‑fns** · CSV **PapaParse** |
+| UI | **lucide‑react**, **framer‑motion**, **react‑hot‑toast** |
+| PWA | **next‑pwa** · Tests **Vitest** |
+| AI (optional) | **Groq** / **Gemini** / **Anthropic** via a server route |
 
 ---
 
 ## ⚙️ Getting started
 
-### Prerequisites
-- Node.js 18+
-- A free [Supabase](https://supabase.com) project
+**Prerequisites:** Node.js 18+ and a free [Supabase](https://supabase.com) project.
 
-### 1. Clone & install
 ```bash
+# 1. Clone & install
 git clone https://github.com/nitsmee/New-Money-control-system.git
 cd New-Money-control-system
 npm install
-```
 
-### 2. Environment
-Copy `.env.local.example` → `.env.local` and fill in:
-```bash
-NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
-# Optional AI: GROQ_API_KEY / GEMINI_API_KEY / ANTHROPIC_API_KEY
-```
+# 2. Environment — create .env.local
+#    NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+#    NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+#    (optional) GROQ_API_KEY / GEMINI_API_KEY / ANTHROPIC_API_KEY
 
-### 3. Database
-Run the SQL migrations in order (see below).
+# 3. Database — run the SQL migrations in order (see table below)
 
-### 4. Run
-```bash
+# 4. Run
 npm run dev      # http://localhost:3000
 ```
 
@@ -293,37 +251,36 @@ Apply the files in `supabase/migrations/` **in order** via the Supabase SQL Edit
 |---|---|
 | `001_initial_schema` | Core tables (accounts, transactions, income, budgets, goals, fixed_expenses, categories, owners, user_settings) + RLS |
 | `002` / `003` / `004` | Views/functions, settings, category default account |
-| `005_recurring_income` | Recurring-income templates |
+| `005_recurring_income` | Recurring‑income templates |
 | `006_income_recurring_fields` | `period`, `recurring_income_id`, `description` on income |
-| `007_income_recurring_unique` | Unique index preventing duplicate auto-posted income |
+| `007_income_recurring_unique` | Unique index preventing duplicate auto‑posted income |
 | `008_multi_currency` | `accounts.currency` + `user_settings.exchange_rates` |
 | `009_enable_realtime` | Adds tables to the Realtime publication |
-| `010_recycle_bin` | `transactions.deleted_at` (soft delete) + active/deleted indexes |
+| `010_recycle_bin` | `transactions.deleted_at` (soft delete) + indexes |
 
-> All migrations are idempotent (`IF NOT EXISTS`). Every table is protected by **Row-Level Security** keyed to `auth.uid()`, so users only ever see their own data.
+> All migrations are idempotent (`IF NOT EXISTS`). Every table is protected by **Row‑Level Security** keyed to `auth.uid()` — users only ever see their own data.
 
 ---
 
 ## 🧪 Testing
 
-The money-critical engine (`src/lib/utils/calculations.ts`, `autoProcess.ts`) is covered by **Vitest**:
+The money‑critical engine (`src/lib/utils/calculations.ts`, `autoProcess.ts`) is covered by **Vitest**:
 
 ```bash
-npm test          # run once  (33 tests)
+npm test            # run once (33 tests)
 npm run test:watch
 ```
 
-Covers currency conversion, account-balance sign conventions, cross-currency transfers, budget pacing, goal analysis, the **account ledger + running balances** (final running balance provably equals the computed balance), leap-year due-date clamping, and auto-process idempotency.
+Covers currency conversion, account‑balance sign conventions, cross‑currency transfers, budget pacing, goal analysis, the **account ledger + running balances** (final running balance provably equals the computed balance), leap‑year due‑date clamping, and auto‑process idempotency.
 
 ---
 
-## ▲ Deployment
+## ▲ Deployment (Vercel)
 
-Deployed on **Vercel**:
 1. Import the GitHub repo into Vercel.
 2. Add the env vars (Supabase keys; optional AI key).
 3. Run the SQL migrations against your Supabase project.
-4. Push to `main` → Vercel auto-deploys.
+4. Push to `main` → Vercel auto‑deploys.
 
 ---
 
@@ -335,28 +292,28 @@ src/
 │  ├─ api/
 │  │  ├─ fx/route.ts              # free exchange rates
 │  │  └─ finance-bot/route.ts     # optional LLM fallback
-│  ├─ auth/                        # login / register / callback
+│  ├─ auth/                       # login / register / callback
 │  └─ dashboard/
-│     ├─ page.tsx                  # KPIs, charts, net-worth trend
-│     ├─ transactions/             # filters, sort, pagination, sums
+│     ├─ page.tsx                 # hero, KPIs, charts, recent activity
+│     ├─ accounts/                # account cards + statement modal
+│     ├─ transactions/            # filters, sort, pagination, summary cards
 │     ├─ income/ · recurring-income/
 │     ├─ fixed-expenses/ · budget/ · goals/
-│     ├─ reports/ · alerts/ · accounts/ · settings/
-│     └─ layout.tsx                # nav, realtime, global search, bot
-├─ components/                     # FinanceBot, CurrencySelect, CSVImportModal,
-│                                  # GlobalSearch, OnboardingWizard, …
+│     ├─ reports/ · alerts/ · settings/ · recycle-bin/
+│     └─ layout.tsx               # nav, realtime, global search, bot
+├─ components/                    # FinanceBot, CurrencySelect, MultiSelect,
+│                                 # CSVImportModal, GlobalSearch, Onboarding…
 ├─ lib/
 │  ├─ utils/
-│  │  ├─ calculations.ts           # the accounting + currency engine
-│  │  ├─ calculations.test.ts      # ✅ unit tests
-│  │  ├─ autoProcess.ts            # fixed-expense auto-posting
-│  │  ├─ autoProcess.test.ts       # ✅ unit tests
+│  │  ├─ calculations.ts          # the accounting + currency engine
+│  │  ├─ calculations.test.ts     # ✅ unit tests
+│  │  ├─ autoProcess.ts           # fixed-expense auto-posting (+ tests)
 │  │  └─ autoProcessIncome.ts
-│  ├─ store/appStore.ts            # Zustand store + loadAll
-│  ├─ supabase/                    # client/server helpers
-│  └─ useDisplayCurrency.ts        # display-currency hook
-├─ types/index.ts                  # all TypeScript models
-supabase/migrations/               # 001 → 009 SQL
+│  ├─ store/appStore.ts           # Zustand store + loadAll
+│  ├─ supabase/                   # client/server helpers
+│  └─ offline.ts                  # offline write queue
+├─ types/index.ts                 # all TypeScript models
+supabase/migrations/              # 001 → 010 SQL
 ```
 
 ---
@@ -369,24 +326,21 @@ supabase/migrations/               # 001 → 009 SQL
 | `npm run build` | Production build |
 | `npm start` | Run the production build |
 | `npm run lint` | ESLint |
-| `npm run typecheck` | `tsc --noEmit` |
 | `npm test` | Run the Vitest suite |
 
 ---
 
 ## 🗺 Roadmap
 
-- 🧳 **Trip / event grouping** (per-trip totals & currency summary)
-- 💱 Cross-currency transfer with an in-form rate field
-- 🔔 Push / email bill reminders
-- 📊 Cashflow forecast (next 1–3 months)
+- 🧳 Trip / event grouping (per‑trip totals & currency summary)
+- 💱 Cross‑currency transfer with an in‑form rate field
+- 🔔 Push / email bill reminders · 📊 cashflow forecast (next 1–3 months)
 - 🧾 Receipt attachments · 🏦 debt/loan payoff module
-- ⚙️ Server-side pagination · migration runner · split large files
 
 ---
 
 <div align="center">
 
-Built with ❤️ for clear, multi-currency money management.
+Built with ❤️ for clear, multi‑currency money management.
 
 </div>
