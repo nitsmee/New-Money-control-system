@@ -2,7 +2,8 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useAppStore } from '@/lib/store/appStore';
 import { createClient } from '@/lib/supabase/client';
-import { Transaction, TransactionType, TRANSACTION_TYPES } from '@/types';
+import { Transaction, Income, TransactionType, TRANSACTION_TYPES } from '@/types';
+import Link from 'next/link';
 import { formatCurrency, currencySymbol, convertAmount, runningBalanceByEntry } from '@/lib/utils/calculations';
 import { useDisplayCurrency } from '@/lib/useDisplayCurrency';
 import { format, endOfMonth, startOfMonth, subMonths, startOfYear, endOfYear, subYears } from 'date-fns';
@@ -52,6 +53,13 @@ const TYPE_COLOR: Record<TransactionType, string> = {
 // Quick date-range presets. A custom From/To range covers everything else
 // (a single month, several months, a whole year, etc.).
 const DATE_PRESETS = ['This Month', 'Last Month', 'Last 3 Months', 'This Year', 'Last Year', 'All Time', 'Custom'];
+
+// A unified table row: either a real transaction OR an income credit. Income is
+// shown here READ-ONLY (it's created/edited on the Income page) so that the
+// history + running balance line up with the account statement and dashboard.
+type Row = (Transaction & { _kind: 'tx' }) | (Income & { _kind: 'income' });
+const rowOwner = (r: Row) => r.owner_purpose ?? null;
+const rowFromId = (r: Row) => (r._kind === 'income' ? null : r.from_account_id ?? null);
 
 export default function TransactionsPage() {
   const { transactions, income, accounts, categories, owners, addTransaction, updateTransaction, removeTransaction, settings } = useAppStore();
@@ -138,37 +146,55 @@ export default function TransactionsPage() {
   const activeOwners = useMemo(() => owners.filter(o => o.is_active), [owners]);
 
   // Distinct values actually present in the data — power the filter dropdowns.
-  const filterCategories = useMemo(() => Array.from(new Set(transactions.map(t => t.category).filter(Boolean) as string[])).sort(), [transactions]);
-  const filterOwners = useMemo(() => Array.from(new Set(transactions.map(t => t.owner_purpose).filter(Boolean) as string[])).sort(), [transactions]);
+  const filterCategories = useMemo(() => Array.from(new Set([...transactions.map(t => t.category), ...income.map(i => i.category)].filter(Boolean) as string[])).sort(), [transactions, income]);
+  const filterOwners = useMemo(() => Array.from(new Set([...transactions.map(t => t.owner_purpose), ...income.map(i => i.owner_purpose)].filter(Boolean) as string[])).sort(), [transactions, income]);
+
+  // Unified list: transactions + income credits, each tagged with `_kind`.
+  const allRows: Row[] = useMemo(() => [
+    ...transactions.map(t => ({ ...t, _kind: 'tx' as const })),
+    ...income.map(i => ({ ...i, _kind: 'income' as const })),
+  ], [transactions, income]);
 
   // Amount of a transaction converted into the display currency (source currency
-  // = its from-account, falling back to to-account). Used for sums + sorting.
+  // = its from-account, falling back to to-account). Used for the selected-sum.
   const convDisp = useMemo(() => {
     const curById = (id?: string | null) => accounts.find(a => a.id === id)?.currency || base;
     return (t: Transaction) => convertAmount(t.amount, curById(t.from_account_id ?? t.to_account_id), displayCur, rates, base);
   }, [accounts, displayCur, rates, base]);
 
+  // Same conversion, for a unified row (income's source = its to-account).
+  const rowConv = useMemo(() => {
+    const curById = (id?: string | null) => accounts.find(a => a.id === id)?.currency || base;
+    return (r: Row) => convertAmount(r.amount, curById(r._kind === 'income' ? r.to_account_id : (r.from_account_id ?? r.to_account_id)), displayCur, rates, base);
+  }, [accounts, displayCur, rates, base]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const rows = transactions.filter(t => {
-      if (fromDate && t.date < fromDate) return false;
-      if (toDate && t.date > toDate) return false;
-      if (!(selTypes.length === 0 || selTypes.includes(t.type))) return false;
-      if (!(selCategories.length === 0 || (t.category && selCategories.includes(t.category)))) return false;
-      if (!(selAccounts.length === 0 || (t.from_account_id && selAccounts.includes(t.from_account_id)) || (t.to_account_id && selAccounts.includes(t.to_account_id)))) return false;
-      if (!(selOwners.length === 0 || (t.owner_purpose && selOwners.includes(t.owner_purpose)))) return false;
+    const rows = allRows.filter(r => {
+      const rType = r._kind === 'income' ? 'income' : r.type;
+      if (fromDate && r.date < fromDate) return false;
+      if (toDate && r.date > toDate) return false;
+      if (!(selTypes.length === 0 || selTypes.includes(rType))) return false;
+      if (!(selCategories.length === 0 || (r.category && selCategories.includes(r.category)))) return false;
+      const fromId = rowFromId(r), toId = r.to_account_id ?? null;
+      if (!(selAccounts.length === 0 || (fromId && selAccounts.includes(fromId)) || (toId && selAccounts.includes(toId)))) return false;
+      const owner = rowOwner(r);
+      if (!(selOwners.length === 0 || (owner && selOwners.includes(owner)))) return false;
       if (q) {
-        const hay = `${t.description ?? ''} ${t.category ?? ''} ${t.owner_purpose ?? ''} ${t.notes ?? ''} ${t.amount}`.toLowerCase();
+        const src = r._kind === 'income' ? (r.source ?? '') : '';
+        const hay = `${r.description ?? ''} ${r.category ?? ''} ${owner ?? ''} ${r.notes ?? ''} ${src} ${r.amount}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
     });
     rows.sort((a, b) => {
-      const cmp = sortKey === 'amount' ? convDisp(a) - convDisp(b) : a.date.localeCompare(b.date);
+      const cmp = sortKey === 'amount'
+        ? rowConv(a) - rowConv(b)
+        : (a.date.localeCompare(b.date) || (a.created_at ?? '').localeCompare(b.created_at ?? ''));
       return sortDir === 'asc' ? cmp : -cmp;
     });
     return rows;
-  }, [transactions, fromDate, toDate, selTypes, selCategories, selAccounts, selOwners, search, sortKey, sortDir, convDisp]);
+  }, [allRows, fromDate, toDate, selTypes, selCategories, selAccounts, selOwners, search, sortKey, sortDir, rowConv]);
 
   // Client-side pagination of the rendered rows. `filtered` stays the full
   // filtered set (so summary sums + bulk operations cover everything); only the
@@ -189,17 +215,21 @@ export default function TransactionsPage() {
   // Summary of the currently-filtered rows (all amounts converted to display
   // currency). Drives the count + per-type sums + filtered total.
   const totals = useMemo(() => {
-    let expense = 0, saving = 0, cc_payment = 0, transfer = 0, total = 0;
-    for (const t of filtered) {
-      const v = convDisp(t);
+    let expense = 0, saving = 0, cc_payment = 0, transfer = 0, income_sum = 0, total = 0;
+    for (const r of filtered) {
+      const v = rowConv(r);
       total += v;
-      if (t.type === 'expense') expense += v;
-      else if (t.type === 'saving') saving += v;
-      else if (t.type === 'credit_card_payment') cc_payment += v;
-      else if (t.type === 'transfer') transfer += v;
+      if (r._kind === 'income') income_sum += v;
+      else if (r.type === 'expense') expense += v;
+      else if (r.type === 'saving') saving += v;
+      else if (r.type === 'credit_card_payment') cc_payment += v;
+      else if (r.type === 'transfer') transfer += v;
     }
-    return { count: filtered.length, expense, saving, cc_payment, transfer, total };
-  }, [filtered, convDisp]);
+    return { count: filtered.length, expense, saving, cc_payment, transfer, income: income_sum, total };
+  }, [filtered, rowConv]);
+
+  // Only real transactions can be ticked for bulk delete (income is read-only here).
+  const selectableFiltered = useMemo(() => filtered.filter(r => r._kind === 'tx'), [filtered]);
 
   // Sum of the rows the user has ticked (across all data, not just this page).
   const selectedSum = useMemo(
@@ -207,13 +237,13 @@ export default function TransactionsPage() {
     [transactions, selectedIds, convDisp]
   );
 
-  const allVisibleSelected = filtered.length > 0 && filtered.every(t => selectedIds.has(t.id));
+  const allVisibleSelected = selectableFiltered.length > 0 && selectableFiltered.every(r => selectedIds.has(r.id));
 
   const toggleSelectAll = () => {
     if (allVisibleSelected) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(filtered.map(t => t.id)));
+      setSelectedIds(new Set(selectableFiltered.map(r => r.id)));
     }
   };
 
@@ -389,7 +419,7 @@ export default function TransactionsPage() {
       <div className="page-header">
         <div>
           <h1 className="page-title">Transactions</h1>
-          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Daily entries — expenses, transfers, savings, CC payments</p>
+          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Daily entries — expenses, income, transfers, savings, CC payments</p>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => setShowCSVImport(true)} className="btn-md btn-secondary"><Upload size={16} /> Import CSV</button>
@@ -414,7 +444,7 @@ export default function TransactionsPage() {
           <MultiSelect
             value={selTypes}
             onChange={setSelTypes}
-            options={TRANSACTION_TYPES.map(t => ({ value: t.value, label: t.label }))}
+            options={[{ value: 'income', label: 'Income' }, ...TRANSACTION_TYPES.map(t => ({ value: t.value, label: t.label }))]}
             placeholder="All Types"
           />
           <MultiSelect
@@ -442,7 +472,8 @@ export default function TransactionsPage() {
 
         {/* Summary of filtered results */}
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs pt-2 border-t border-slate-100 dark:border-slate-700" style={{ color: 'var(--text-muted)' }}>
-          <span><strong style={{ color: 'var(--text-primary)' }}>{totals.count}</strong> transaction{totals.count === 1 ? '' : 's'}</span>
+          <span><strong style={{ color: 'var(--text-primary)' }}>{totals.count}</strong> {totals.count === 1 ? 'entry' : 'entries'}</span>
+          {totals.income > 0 && <span>Income: <strong className="text-emerald-600 dark:text-emerald-400">{formatCurrency(totals.income, symD)}</strong></span>}
           {totals.expense > 0 && <span>Expense: <strong className="amount-negative">{formatCurrency(totals.expense, symD)}</strong></span>}
           {totals.saving > 0 && <span>Savings: <strong className="text-blue-600">{formatCurrency(totals.saving, symD)}</strong></span>}
           {totals.cc_payment > 0 && <span>CC Paid: <strong className="text-amber-600">{formatCurrency(totals.cc_payment, symD)}</strong></span>}
@@ -648,7 +679,38 @@ export default function TransactionsPage() {
                     : 'No transactions for this period. Click "Add Transaction" to start.'}
                 </td></tr>
               )}
-              {paged.map(tx => {
+              {paged.map(row => {
+                // Income credits: read-only row (edited on the Income page).
+                if (row._kind === 'income') {
+                  const acc = accounts.find(a => a.id === row.to_account_id);
+                  const info = runningMap.get(row.id);
+                  return (
+                    <tr key={`inc-${row.id}`}>
+                      <td></td>
+                      <td className="text-xs whitespace-nowrap" style={{ color: 'var(--text-muted)' }}>{row.date}</td>
+                      <td className="max-w-xs text-sm">{row.description || row.source || 'Income'}</td>
+                      <td><span className="badge text-[10px] badge-green">income</span></td>
+                      <td className="text-xs">{row.category ?? '—'}</td>
+                      <td className="text-xs">{row.owner_purpose ?? '—'}</td>
+                      <td className="text-xs" style={{ color: 'var(--text-secondary)' }}>—</td>
+                      <td className="text-xs" style={{ color: 'var(--text-secondary)' }}>{acc?.name ?? '—'}</td>
+                      <td className="text-right font-semibold text-sm text-emerald-600 dark:text-emerald-400">
+                        +{formatCurrency(row.amount, currencySymbol(curOf(row.to_account_id)))}
+                        {info && (
+                          <div className="text-[10px] font-normal" style={{ color: 'var(--text-muted)' }}>
+                            {info.isCreditCard ? 'due' : 'bal'} {formatCurrency(info.running, currencySymbol(info.currency))}
+                          </div>
+                        )}
+                      </td>
+                      <td>
+                        <div className="flex items-center justify-end gap-1">
+                          <Link href="/dashboard/income" aria-label="Edit on Income page" title="Income credit — edit it on the Income page" className="btn-icon text-slate-400 hover:text-blue-600"><Pencil size={14} /></Link>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                }
+                const tx = row;
                 const fromAcc = accounts.find(a => a.id === tx.from_account_id);
                 const toAcc = accounts.find(a => a.id === tx.to_account_id);
                 return (

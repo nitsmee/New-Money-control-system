@@ -248,6 +248,17 @@ export default function DashboardPage() {
   const budgetStatus = useMemo(() => calculateBudgetStatus(budgets, norm.transactions, displayFixedExpenses, now, mbMonth, mbYear), [budgets, norm.transactions, displayFixedExpenses, mbMonth, mbYear]);
   const trends = useMemo(() => buildMonthlyTrends(norm.income, norm.transactions, 12), [norm.income, norm.transactions]);
 
+  // Recent activity = transactions AND income credits, newest first. Income is
+  // shown read-only so the list matches the Transactions page + account statement.
+  const recentEntries = useMemo(() => {
+    const rows = [
+      ...transactions.map(t => ({ kind: 'tx' as const, id: t.id, date: t.date, created_at: t.created_at ?? '', label: t.description || t.category || t.type.replace(/_/g, ' '), category: t.category ?? null, type: t.type, amount: t.amount, acctId: t.from_account_id ?? t.to_account_id ?? null })),
+      ...income.map(i => ({ kind: 'income' as const, id: i.id, date: i.date, created_at: i.created_at ?? '', label: i.description || i.source || 'Income', category: i.category ?? null, type: 'income', amount: i.amount, acctId: i.to_account_id ?? null })),
+    ];
+    rows.sort((a, b) => b.date.localeCompare(a.date) || b.created_at.localeCompare(a.created_at));
+    return rows.slice(0, 10);
+  }, [transactions, income]);
+
   // Net worth at the end of each of the last 12 months, all in the DISPLAY
   // currency (norm.* is already converted). Mirrors the dashboard net-worth
   // definition: cash + savings + investment − card debt, excluding family/shared.
@@ -824,23 +835,23 @@ export default function DashboardPage() {
       {/* Recent transactions */}
       <div className="card animate-fade-in-up">
         <div className="flex items-center justify-between p-5 pb-0">
-          <h3 className="section-title text-base">Recent Transactions</h3>
+          <h3 className="section-title text-base">Recent Activity</h3>
           <Link href="/dashboard/transactions" className="text-xs text-blue-600 hover:underline">View all →</Link>
         </div>
         <div className="table-container mt-4 border-0 border-t border-slate-100 dark:border-slate-700 rounded-none rounded-b-xl">
           <table className="data-table">
             <thead><tr><th>Date</th><th>Description</th><th>Category</th><th>Type</th><th className="text-right">Amount</th></tr></thead>
             <tbody>
-              {transactions.slice(0, 10).map(tx => (
-                <tr key={tx.id}>
-                  <td className="text-xs whitespace-nowrap" style={{ color: 'var(--text-muted)' }}>{tx.date}</td>
-                  <td className="max-w-xs"><span className="truncate block" style={{ maxWidth: 200 }}>{tx.description || tx.category || tx.type}</span></td>
-                  <td><span className="badge badge-gray text-[10px]">{tx.category ?? '—'}</span></td>
-                  <td><span className={`badge text-[10px] ${tx.type === 'expense' ? 'badge-red' : tx.type === 'saving' ? 'badge-blue' : tx.type === 'credit_card_payment' ? 'badge-yellow' : 'badge-gray'}`}>{tx.type.replace(/_/g, ' ')}</span></td>
-                  <td className={`text-right font-semibold text-sm ${tx.type === 'expense' ? 'amount-negative' : tx.type === 'saving' ? 'text-blue-600' : 'amount-positive'}`}>{tx.type === 'expense' ? '-' : ''}{formatCurrency(tx.amount, txSymbol(tx))}</td>
+              {recentEntries.map(e => (
+                <tr key={`${e.kind}-${e.id}`}>
+                  <td className="text-xs whitespace-nowrap" style={{ color: 'var(--text-muted)' }}>{e.date}</td>
+                  <td className="max-w-xs"><span className="truncate block" style={{ maxWidth: 200 }}>{e.label}</span></td>
+                  <td><span className="badge badge-gray text-[10px]">{e.category ?? '—'}</span></td>
+                  <td><span className={`badge text-[10px] ${e.kind === 'income' ? 'badge-green' : e.type === 'expense' ? 'badge-red' : e.type === 'saving' ? 'badge-blue' : e.type === 'credit_card_payment' ? 'badge-yellow' : 'badge-gray'}`}>{e.kind === 'income' ? 'income' : e.type.replace(/_/g, ' ')}</span></td>
+                  <td className={`text-right font-semibold text-sm ${e.kind === 'income' ? 'text-emerald-600 dark:text-emerald-400' : e.type === 'expense' ? 'amount-negative' : e.type === 'saving' ? 'text-blue-600' : 'amount-positive'}`}>{e.kind === 'income' ? '+' : e.type === 'expense' ? '-' : ''}{formatCurrency(e.amount, txSymbol({ to_account_id: e.acctId }))}</td>
                 </tr>
               ))}
-              {transactions.length === 0 && <tr><td colSpan={5} className="text-center py-8 text-sm" style={{ color: 'var(--text-muted)' }}>No transactions yet. <Link href="/dashboard/transactions" className="text-blue-600 hover:underline">Add one →</Link></td></tr>}
+              {recentEntries.length === 0 && <tr><td colSpan={5} className="text-center py-8 text-sm" style={{ color: 'var(--text-muted)' }}>No transactions yet. <Link href="/dashboard/transactions" className="text-blue-600 hover:underline">Add one →</Link></td></tr>}
             </tbody>
           </table>
         </div>
