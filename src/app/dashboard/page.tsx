@@ -604,7 +604,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Net-worth hero */}
+      {/* Net-worth hero (signature gradient banner — the base of the app theme) */}
       <div
         className="relative overflow-hidden rounded-2xl p-5 sm:p-6 animate-fade-in-up"
         style={{ backgroundImage: 'linear-gradient(135deg, #4f46e5, #7c3aed 55%, #2563eb)', boxShadow: '0 16px 32px -16px rgba(79,70,229,0.6)', color: '#fff' }}
@@ -642,7 +642,7 @@ export default function DashboardPage() {
       {activeAlerts.length > 0 && (
         <div className="space-y-2">
           {activeAlerts.slice(0, 3).map(a => (
-            <div key={a.id} className={`flex items-center gap-3 p-3 rounded-lg border text-sm ${a.severity === 'error' ? 'bg-red-50 border-red-200 text-red-800' : 'bg-amber-50 border-amber-200 text-amber-800'} dark:bg-opacity-10`}>
+            <div key={a.id} className={`flex items-center gap-3 p-3 rounded-lg border text-sm ${a.severity === 'error' ? 'bg-red-50 border-red-200 text-red-800 dark:bg-red-900/20 dark:border-red-800 dark:text-red-300' : 'bg-amber-50 border-amber-200 text-amber-800 dark:bg-amber-900/20 dark:border-amber-800 dark:text-amber-300'}`}>
               <AlertTriangle size={16} className="flex-shrink-0" />
               <span className="font-medium">{a.title}:</span> <span>{a.message}</span>
             </div>
@@ -658,7 +658,7 @@ export default function DashboardPage() {
               <span className="text-sm font-semibold flex items-center gap-2"><Wallet size={16} /> Salary used this month</span>
               <span className={`text-sm font-medium ${salaryLeft >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>{salaryLeft >= 0 ? `${formatCurrency(salaryLeft, sym)} left` : `Over by ${formatCurrency(-salaryLeft, sym)}`}</span>
             </div>
-            <div className="h-2.5 rounded-full overflow-hidden" style={{ background: 'var(--bg-tertiary, #e2e8f0)' }}>
+            <div className="h-2.5 rounded-full overflow-hidden" style={{ background: 'var(--bg-muted)' }}>
               <div className="h-full rounded-full transition-all duration-700" style={{ width: `${salaryPct}%`, background: salaryPct >= 100 ? '#ef4444' : '#3b82f6' }} />
             </div>
             <div className="flex justify-between mt-1.5 text-xs" style={{ color: 'var(--text-muted)' }}>

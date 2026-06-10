@@ -148,32 +148,29 @@ export default function AccountsPage() {
             <button
               key={b.account.id}
               onClick={() => openAccount(b.account.id)}
-              className="text-left relative overflow-hidden rounded-2xl p-5 min-h-[140px] transition-all duration-200 hover:-translate-y-1 active:scale-[0.99] animate-fade-in-up"
+              className="card card-p text-left relative overflow-hidden group transition-all duration-200 hover:-translate-y-1 hover:shadow-xl active:scale-[0.99] animate-fade-in-up"
               style={{
-                backgroundImage: `linear-gradient(135deg, color-mix(in srgb, ${meta.color} 85%, #000), color-mix(in srgb, ${meta.color} 50%, #000))`,
-                boxShadow: `0 10px 24px -10px color-mix(in srgb, ${meta.color} 75%, transparent)`,
-                color: '#fff',
+                background: `color-mix(in srgb, ${meta.color} 12%, var(--bg-surface))`,
+                borderColor: `color-mix(in srgb, ${meta.color} 28%, var(--border-default))`,
               }}
             >
-              {/* Glossy sheen across the top */}
-              <span className="absolute pointer-events-none" style={{ top: -64, left: -24, right: -24, height: 128, transform: 'rotate(-8deg)', background: 'linear-gradient(180deg, rgba(255,255,255,0.28), transparent)' }} />
-              {/* Card chip motif */}
-              <span className="absolute pointer-events-none rounded" style={{ top: 18, right: 18, width: 28, height: 20, background: 'linear-gradient(135deg,#ffe9a8,#d9b24a)', opacity: 0.92 }} />
+              {/* Accent strip */}
+              <span className="absolute left-0 top-0 bottom-0 w-1 rounded-l-xl" style={{ background: meta.color }} />
+              {/* Soft corner glow */}
+              <span className="absolute -top-8 -right-8 w-28 h-28 rounded-full pointer-events-none transition-transform duration-300 group-hover:scale-125" style={{ background: meta.color, opacity: 0.1 }} />
               <div className="relative z-10">
                 <div className="flex items-center gap-3">
-                  <span className="inline-flex items-center justify-center w-11 h-11 rounded-xl flex-shrink-0" style={{ background: 'rgba(255,255,255,0.22)', color: '#fff' }}>
+                  <span className="inline-flex items-center justify-center w-11 h-11 rounded-xl flex-shrink-0" style={{ background: `${meta.color}24`, color: meta.color }}>
                     <Icon size={20} />
                   </span>
                   <div className="min-w-0">
-                    <p className="font-semibold text-sm leading-tight truncate text-white">{b.account.name}</p>
-                    <span className="badge text-[10px] mt-0.5" style={{ background: 'rgba(255,255,255,0.22)', color: '#fff' }}>{meta.label}</span>
+                    <p className="font-semibold text-sm leading-tight truncate" style={{ color: 'var(--text-primary)' }}>{b.account.name}</p>
+                    <span className="badge text-[10px] mt-0.5" style={{ background: `${meta.color}24`, color: meta.color }}>{meta.label}</span>
                   </div>
                 </div>
-                <div className="mt-5">
-                  <p className="text-[10px] uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.82)' }}>
-                    {b.is_credit_card ? 'Outstanding · •••• ••••' : 'Balance'}
-                  </p>
-                  <p className="text-2xl font-bold tracking-tight mt-0.5 text-white">
+                <div className="mt-4">
+                  <p className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>{b.is_credit_card ? 'Outstanding' : 'Balance'}</p>
+                  <p className="text-2xl font-bold tracking-tight mt-0.5" style={{ color: meta.color }}>
                     {formatCurrency(val, sym)}
                   </p>
                 </div>
@@ -183,31 +180,30 @@ export default function AccountsPage() {
         })}
       </div>
 
-      {/* Detail drawer */}
+      {/* Detail modal (centered) */}
       {selected && (
-        <div className="fixed inset-0 z-50 flex justify-end" style={{ background: 'var(--bg-overlay)' }} onClick={() => setSelectedId(null)}>
-          <div className="card h-full w-full max-w-md overflow-y-auto animate-slide-up rounded-none" onClick={e => e.stopPropagation()}>
-            {/* Header — styled like the account's wallet card (solid gradient, white text) */}
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'var(--bg-overlay)' }} onClick={() => setSelectedId(null)}>
+          <div className="card w-full max-w-lg max-h-[90vh] overflow-y-auto animate-fade-in-up rounded-2xl" onClick={e => e.stopPropagation()}>
+            {/* Header — soft accent tint matching the account's card */}
             <div
-              className="relative overflow-hidden flex items-center justify-between p-5"
+              className="relative overflow-hidden flex items-center justify-between p-5 border-b"
               style={{
-                backgroundImage: `linear-gradient(135deg, color-mix(in srgb, ${selMeta.color} 88%, #000), color-mix(in srgb, ${selMeta.color} 52%, #000))`,
-                color: '#fff',
+                background: `color-mix(in srgb, ${selMeta.color} 12%, var(--bg-surface))`,
+                borderColor: `color-mix(in srgb, ${selMeta.color} 24%, var(--border-default))`,
               }}
             >
-              <span className="absolute pointer-events-none" style={{ top: -70, left: -24, right: -24, height: 130, transform: 'rotate(-8deg)', background: 'linear-gradient(180deg, rgba(255,255,255,0.22), transparent)' }} />
-              <div className="relative z-10 flex items-center gap-3 min-w-0">
-                <span className="inline-flex items-center justify-center w-11 h-11 rounded-xl flex-shrink-0" style={{ background: 'rgba(255,255,255,0.22)', color: '#fff' }}>
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="inline-flex items-center justify-center w-11 h-11 rounded-xl flex-shrink-0" style={{ background: `${selMeta.color}24`, color: selMeta.color }}>
                   <SelIcon size={20} />
                 </span>
                 <div className="min-w-0">
-                  <h2 className="text-lg font-semibold truncate text-white">{selected.account.name}</h2>
-                  <p className="text-sm font-medium" style={{ color: 'rgba(255,255,255,0.88)' }}>
+                  <h2 className="text-lg font-semibold truncate" style={{ color: 'var(--text-primary)' }}>{selected.account.name}</h2>
+                  <p className="text-sm font-medium" style={{ color: selected.is_credit_card ? 'var(--text-danger)' : 'var(--text-secondary)' }}>
                     {selected.is_credit_card ? 'Outstanding ' : 'Balance '}{formatCurrency(displayBalance(selected), sym)}
                   </p>
                 </div>
               </div>
-              <button onClick={() => setSelectedId(null)} className="btn-icon flex-shrink-0 relative z-10 hover:bg-white/20" style={{ color: '#fff' }}><X size={18} /></button>
+              <button onClick={() => setSelectedId(null)} className="btn-icon flex-shrink-0"><X size={18} /></button>
             </div>
 
             {/* View toggle: Statement | Quick Add */}
