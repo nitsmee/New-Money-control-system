@@ -471,15 +471,59 @@ export default function TransactionsPage() {
         </div>
 
         {/* Summary of filtered results */}
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs pt-2 border-t border-slate-100 dark:border-slate-700" style={{ color: 'var(--text-muted)' }}>
-          <span><strong style={{ color: 'var(--text-primary)' }}>{totals.count}</strong> {totals.count === 1 ? 'entry' : 'entries'}</span>
-          {totals.income > 0 && <span>Income: <strong className="text-emerald-600 dark:text-emerald-400">{formatCurrency(totals.income, symD)}</strong></span>}
-          {totals.expense > 0 && <span>Expense: <strong className="amount-negative">{formatCurrency(totals.expense, symD)}</strong></span>}
-          {totals.saving > 0 && <span>Savings: <strong className="text-blue-600">{formatCurrency(totals.saving, symD)}</strong></span>}
-          {totals.cc_payment > 0 && <span>CC Paid: <strong className="text-amber-600">{formatCurrency(totals.cc_payment, symD)}</strong></span>}
-          {totals.transfer > 0 && <span>Transfers: <strong>{formatCurrency(totals.transfer, symD)}</strong></span>}
-          <span>Filtered total: <strong style={{ color: 'var(--text-primary)' }}>{formatCurrency(totals.total, symD)}</strong></span>
-          <span className="opacity-70">(in {displayCur})</span>
+        <div className="pt-2 border-t border-slate-100 dark:border-slate-700">
+          <p className="text-xs font-medium mb-2" style={{ color: 'var(--text-muted)' }}>
+            <strong style={{ color: 'var(--text-primary)' }}>{totals.count}</strong> {totals.count === 1 ? 'entry' : 'entries'}
+          </p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+            {totals.income > 0 && (
+              <div className="relative overflow-hidden rounded-xl border p-3"
+                style={{ background: `color-mix(in srgb, #10b981 12%, var(--bg-surface))`, borderColor: `color-mix(in srgb, #10b981 28%, var(--border-default))` }}>
+                <span className="absolute left-0 top-0 bottom-0 w-1" style={{ background: '#10b981' }} />
+                <p className="text-[10px] uppercase tracking-wide font-semibold" style={{ color: 'var(--text-muted)' }}>Income</p>
+                <p className="text-base font-bold mt-0.5" style={{ color: '#10b981' }}>{formatCurrency(totals.income, symD)}</p>
+              </div>
+            )}
+            {totals.expense > 0 && (
+              <div className="relative overflow-hidden rounded-xl border p-3"
+                style={{ background: `color-mix(in srgb, #ef4444 12%, var(--bg-surface))`, borderColor: `color-mix(in srgb, #ef4444 28%, var(--border-default))` }}>
+                <span className="absolute left-0 top-0 bottom-0 w-1" style={{ background: '#ef4444' }} />
+                <p className="text-[10px] uppercase tracking-wide font-semibold" style={{ color: 'var(--text-muted)' }}>Expense</p>
+                <p className="text-base font-bold mt-0.5" style={{ color: '#ef4444' }}>{formatCurrency(totals.expense, symD)}</p>
+              </div>
+            )}
+            {totals.saving > 0 && (
+              <div className="relative overflow-hidden rounded-xl border p-3"
+                style={{ background: `color-mix(in srgb, #3b82f6 12%, var(--bg-surface))`, borderColor: `color-mix(in srgb, #3b82f6 28%, var(--border-default))` }}>
+                <span className="absolute left-0 top-0 bottom-0 w-1" style={{ background: '#3b82f6' }} />
+                <p className="text-[10px] uppercase tracking-wide font-semibold" style={{ color: 'var(--text-muted)' }}>Savings</p>
+                <p className="text-base font-bold mt-0.5" style={{ color: '#3b82f6' }}>{formatCurrency(totals.saving, symD)}</p>
+              </div>
+            )}
+            {totals.cc_payment > 0 && (
+              <div className="relative overflow-hidden rounded-xl border p-3"
+                style={{ background: `color-mix(in srgb, #f59e0b 12%, var(--bg-surface))`, borderColor: `color-mix(in srgb, #f59e0b 28%, var(--border-default))` }}>
+                <span className="absolute left-0 top-0 bottom-0 w-1" style={{ background: '#f59e0b' }} />
+                <p className="text-[10px] uppercase tracking-wide font-semibold" style={{ color: 'var(--text-muted)' }}>CC Paid</p>
+                <p className="text-base font-bold mt-0.5" style={{ color: '#f59e0b' }}>{formatCurrency(totals.cc_payment, symD)}</p>
+              </div>
+            )}
+            {totals.transfer > 0 && (
+              <div className="relative overflow-hidden rounded-xl border p-3"
+                style={{ background: `color-mix(in srgb, #8b5cf6 12%, var(--bg-surface))`, borderColor: `color-mix(in srgb, #8b5cf6 28%, var(--border-default))` }}>
+                <span className="absolute left-0 top-0 bottom-0 w-1" style={{ background: '#8b5cf6' }} />
+                <p className="text-[10px] uppercase tracking-wide font-semibold" style={{ color: 'var(--text-muted)' }}>Transfers</p>
+                <p className="text-base font-bold mt-0.5" style={{ color: '#8b5cf6' }}>{formatCurrency(totals.transfer, symD)}</p>
+              </div>
+            )}
+            <div className="relative overflow-hidden rounded-xl border p-3"
+              style={{ background: `color-mix(in srgb, #6366f1 12%, var(--bg-surface))`, borderColor: `color-mix(in srgb, #6366f1 28%, var(--border-default))` }}>
+              <span className="absolute left-0 top-0 bottom-0 w-1" style={{ background: '#6366f1' }} />
+              <p className="text-[10px] uppercase tracking-wide font-semibold" style={{ color: 'var(--text-muted)' }}>Filtered total</p>
+              <p className="text-base font-bold mt-0.5" style={{ color: '#6366f1' }}>{formatCurrency(totals.total, symD)}</p>
+            </div>
+          </div>
+          <p className="text-[11px] mt-2" style={{ color: 'var(--text-muted)' }}>(in {displayCur})</p>
         </div>
       </div>
 

@@ -218,9 +218,12 @@ export default function RecurringIncomePage() {
         </div>
         <div className="flex items-center gap-3">
           {active.length > 0 && (
-            <span className="hidden sm:inline text-xs" style={{ color: 'var(--text-muted)' }}>
-              Monthly: <strong className="text-green-600">{formatCurrency(totalActive, sym)}</strong>
-            </span>
+            <div className="hidden sm:flex card relative overflow-hidden flex-col gap-0.5 px-4 py-2"
+              style={{ background: `color-mix(in srgb, #10b981 12%, var(--bg-surface))`, borderColor: `color-mix(in srgb, #10b981 28%, var(--border-default))` }}>
+              <span className="absolute left-0 top-0 bottom-0 w-1 rounded-l-xl" style={{ background: '#10b981' }} />
+              <p className="kpi-label relative z-10">Monthly</p>
+              <p className="kpi-value relative z-10 text-lg" style={{ color: '#10b981' }}>{formatCurrency(totalActive, sym)}</p>
+            </div>
           )}
           <button onClick={openNew} className="btn-md btn-primary">
             <Plus size={16} /> Add Recurring Income

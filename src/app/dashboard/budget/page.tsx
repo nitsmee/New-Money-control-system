@@ -153,18 +153,26 @@ export default function BudgetPage() {
       {/* Summary cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         {[
-          { label: 'Total Budget', value: summary.totalBudget, color: 'text-blue-600', bg: 'bg-blue-50 dark:bg-blue-900/20' },
-          { label: 'Total Actual', value: summary.totalActual, color: summary.totalActual > summary.totalBudget ? 'text-red-500' : 'text-emerald-600', bg: summary.totalActual > summary.totalBudget ? 'bg-red-50 dark:bg-red-900/20' : 'bg-emerald-50 dark:bg-emerald-900/20' },
-          { label: 'Over Budget', value: null, badge: summary.overCount, color: 'text-red-500', bg: 'bg-red-50 dark:bg-red-900/20' },
-          { label: 'On Track', value: null, badge: summary.onTrack, color: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-900/20' },
-          { label: 'Projected Over Budget', value: null, badge: summary.projectedOverCount, color: summary.projectedOverCount > 0 ? 'text-red-500' : 'text-emerald-600', bg: summary.projectedOverCount > 0 ? 'bg-red-50 dark:bg-red-900/20' : 'bg-emerald-50 dark:bg-emerald-900/20' },
+          { label: 'Total Budget', value: summary.totalBudget, badge: null, color: '#6366f1' },
+          { label: 'Total Actual', value: summary.totalActual, badge: null, color: summary.totalActual > summary.totalBudget ? '#ef4444' : '#10b981' },
+          { label: 'Over Budget', value: null, badge: summary.overCount, color: '#ef4444' },
+          { label: 'On Track', value: null, badge: summary.onTrack, color: '#10b981' },
+          { label: 'Projected Over Budget', value: null, badge: summary.projectedOverCount, color: summary.projectedOverCount > 0 ? '#ef4444' : '#10b981' },
         ].map(item => (
-          <div key={item.label} className={`card card-p min-w-0 ${item.bg}`}>
-            <p className="kpi-label truncate">{item.label}</p>
+          <div
+            key={item.label}
+            className="card card-p relative overflow-hidden min-w-0"
+            style={{
+              background: `color-mix(in srgb, ${item.color} 12%, var(--bg-surface))`,
+              borderColor: `color-mix(in srgb, ${item.color} 28%, var(--border-default))`,
+            }}
+          >
+            <span className="absolute left-0 top-0 bottom-0 w-1 rounded-l-xl" style={{ background: item.color }} />
+            <p className="kpi-label truncate relative z-10">{item.label}</p>
             {item.value !== null ? (
-              <p className={`kpi-value mt-1 break-words ${item.color}`}>{formatCurrency(item.value, sym)}</p>
+              <p className="kpi-value mt-1 break-words relative z-10" style={{ color: item.color }}>{formatCurrency(item.value, sym)}</p>
             ) : (
-              <p className={`text-3xl font-bold mt-1 ${item.color}`}>{item.badge}</p>
+              <p className="text-3xl font-bold mt-1 relative z-10" style={{ color: item.color }}>{item.badge}</p>
             )}
           </div>
         ))}
@@ -200,8 +208,17 @@ export default function BudgetPage() {
         )}
         {budgetStatuses.map(bs => {
           const pct = bs.monthly_budget > 0 ? Math.min(100, (bs.actual_till_date / bs.monthly_budget) * 100) : 0;
+          const statusColor = bs.status === 'red' ? '#ef4444' : bs.status === 'green' ? '#10b981' : '#f59e0b';
           return (
-            <div key={bs.category} className="card card-p group">
+            <div
+              key={bs.category}
+              className="card card-p group relative overflow-hidden"
+              style={{
+                background: `color-mix(in srgb, ${statusColor} 10%, var(--bg-surface))`,
+                borderColor: `color-mix(in srgb, ${statusColor} 28%, var(--border-default))`,
+              }}
+            >
+              <span className="absolute left-0 top-0 bottom-0 w-1 rounded-l-xl" style={{ background: statusColor }} />
               <div className="flex items-start justify-between gap-2 mb-3">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">

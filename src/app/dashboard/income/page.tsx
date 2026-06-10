@@ -266,11 +266,25 @@ export default function IncomePage() {
         </div>
 
         {/* Summary of filtered results */}
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs pt-2 border-t border-slate-100 dark:border-slate-700" style={{ color: 'var(--text-muted)' }}>
-          <span><strong style={{ color: 'var(--text-primary)' }}>{filtered.length}</strong> entr{filtered.length === 1 ? 'y' : 'ies'}</span>
-          <span>Total income: <strong className="amount-positive">{formatCurrency(totalIncome, currencySymbol(displayCur))}</strong></span>
-          <span>True income: <strong className="text-blue-600">{formatCurrency(trueIncome, currencySymbol(displayCur))}</strong></span>
-          <span className="opacity-70">(in {displayCur})</span>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3 border-t border-slate-100 dark:border-slate-700">
+          <div className="card card-p relative overflow-hidden flex flex-col gap-1"
+            style={{ background: `color-mix(in srgb, #6366f1 12%, var(--bg-surface))`, borderColor: `color-mix(in srgb, #6366f1 28%, var(--border-default))` }}>
+            <span className="absolute left-0 top-0 bottom-0 w-1 rounded-l-xl" style={{ background: '#6366f1' }} />
+            <p className="kpi-label relative z-10">Entries</p>
+            <p className="kpi-value relative z-10" style={{ color: '#6366f1' }}>{filtered.length}</p>
+          </div>
+          <div className="card card-p relative overflow-hidden flex flex-col gap-1"
+            style={{ background: `color-mix(in srgb, #10b981 12%, var(--bg-surface))`, borderColor: `color-mix(in srgb, #10b981 28%, var(--border-default))` }}>
+            <span className="absolute left-0 top-0 bottom-0 w-1 rounded-l-xl" style={{ background: '#10b981' }} />
+            <p className="kpi-label relative z-10">Total income <span className="opacity-70">(in {displayCur})</span></p>
+            <p className="kpi-value relative z-10" style={{ color: '#10b981' }}>{formatCurrency(totalIncome, currencySymbol(displayCur))}</p>
+          </div>
+          <div className="card card-p relative overflow-hidden flex flex-col gap-1"
+            style={{ background: `color-mix(in srgb, #3b82f6 12%, var(--bg-surface))`, borderColor: `color-mix(in srgb, #3b82f6 28%, var(--border-default))` }}>
+            <span className="absolute left-0 top-0 bottom-0 w-1 rounded-l-xl" style={{ background: '#3b82f6' }} />
+            <p className="kpi-label relative z-10">True income <span className="opacity-70">(in {displayCur})</span></p>
+            <p className="kpi-value relative z-10" style={{ color: '#3b82f6' }}>{formatCurrency(trueIncome, currencySymbol(displayCur))}</p>
+          </div>
         </div>
       </div>
 
