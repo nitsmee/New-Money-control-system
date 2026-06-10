@@ -241,7 +241,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   };
 
   return (
-    <div className="flex h-screen overflow-hidden" style={{ background: 'var(--bg-base)' }}>
+    <div
+      className="flex h-screen overflow-hidden"
+      style={{
+        backgroundColor: 'var(--bg-base)',
+        backgroundImage:
+          'radial-gradient(900px 480px at 100% -8%, color-mix(in srgb, var(--brand-500) 8%, transparent), transparent 60%), radial-gradient(760px 420px at -6% 108%, color-mix(in srgb, var(--success-500) 7%, transparent), transparent 55%)',
+      }}
+    >
       <GlobalSearch />
       <SessionWarning />
       <OnboardingWizard isOpen={showOnboarding} onComplete={() => { setShowOnboarding(false); localStorage.setItem('mcs_onboarding_done', 'true'); }} />

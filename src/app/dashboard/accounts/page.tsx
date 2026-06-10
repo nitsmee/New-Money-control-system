@@ -9,12 +9,15 @@ import { Plus, X, Check, Receipt, Wallet, PiggyBank, TrendingUp, Users, CreditCa
 
 type QAType = 'expense' | 'transfer' | 'saving';
 
-const ROLE_META: Record<string, { label: string; badge: string; Icon: any; tint: string }> = {
-  cash:        { label: 'Cash',        badge: 'badge-green',  Icon: Wallet,     tint: 'var(--text-success)' },
-  savings:     { label: 'Savings',     badge: 'badge-blue',   Icon: PiggyBank,  tint: 'var(--text-primary)' },
-  investment:  { label: 'Investment',  badge: 'badge-blue',   Icon: TrendingUp, tint: '#534AB7' },
-  family:      { label: 'Family',      badge: 'badge-gray',   Icon: Users,      tint: 'var(--text-primary)' },
-  credit_card: { label: 'Credit card', badge: 'badge-red',    Icon: CreditCard, tint: 'var(--text-danger)' },
+// Each account role gets one accent color that drives its icon chip, badge,
+// left strip, corner glow and (for cards) the drawer header — so the page reads
+// colorful but cohesive rather than monochrome.
+const ROLE_META: Record<string, { label: string; Icon: any; color: string }> = {
+  cash:        { label: 'Cash',        Icon: Wallet,     color: '#10b981' },
+  savings:     { label: 'Savings',     Icon: PiggyBank,  color: '#3b82f6' },
+  investment:  { label: 'Investment',  Icon: TrendingUp, color: '#8b5cf6' },
+  family:      { label: 'Family',      Icon: Users,      color: '#f59e0b' },
+  credit_card: { label: 'Credit card', Icon: CreditCard, color: '#f43f5e' },
 };
 
 export default function AccountsPage() {
@@ -52,6 +55,8 @@ export default function AccountsPage() {
 
   const selected = selectedId ? balOf(selectedId) : null;
   const selectedAccount = selected?.account ?? null;
+  const selMeta = selectedAccount ? (ROLE_META[accountRole(selectedAccount)] ?? ROLE_META.cash) : ROLE_META.cash;
+  const SelIcon = selMeta.Icon;
 
   // Full running-balance statement for the selected account (native currency, oldest → newest).
   const ledger = useMemo(
@@ -143,24 +148,28 @@ export default function AccountsPage() {
             <button
               key={b.account.id}
               onClick={() => openAccount(b.account.id)}
-              className="card card-p text-left transition-transform hover:-translate-y-0.5 hover:shadow-lg"
+              className="card card-p text-left relative overflow-hidden group transition-all duration-200 hover:-translate-y-1 hover:shadow-xl active:scale-[0.99] animate-fade-in-up"
             >
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg" style={{ background: 'var(--bg-subtle, rgba(125,125,125,0.12))' }}>
-                    <Icon size={16} style={{ color: meta.tint }} />
+              {/* Left accent strip (matches dashboard KPI cards) */}
+              <span className="absolute left-0 top-0 bottom-0 w-1 rounded-l-xl" style={{ background: meta.color, opacity: 0.9 }} />
+              {/* Soft corner glow (Goals-style) */}
+              <span className="absolute -top-8 -right-8 w-28 h-28 rounded-full pointer-events-none transition-transform duration-300 group-hover:scale-125" style={{ background: meta.color, opacity: 0.1 }} />
+              <div className="relative z-10">
+                <div className="flex items-center gap-3">
+                  <span className="inline-flex items-center justify-center w-11 h-11 rounded-xl flex-shrink-0" style={{ background: `${meta.color}1a`, color: meta.color }}>
+                    <Icon size={20} />
                   </span>
-                  <div>
-                    <p className="font-semibold text-sm leading-tight">{b.account.name}</p>
-                    <span className={`badge ${meta.badge} text-[10px]`}>{meta.label}</span>
+                  <div className="min-w-0">
+                    <p className="font-semibold text-sm leading-tight truncate">{b.account.name}</p>
+                    <span className="badge text-[10px] mt-0.5" style={{ background: `${meta.color}1a`, color: meta.color }}>{meta.label}</span>
                   </div>
                 </div>
-              </div>
-              <div className="mt-3">
-                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{b.is_credit_card ? 'Outstanding' : 'Balance'}</p>
-                <p className="text-xl font-bold" style={{ color: b.is_credit_card ? 'var(--text-danger)' : 'var(--text-primary)' }}>
-                  {formatCurrency(val, sym)}
-                </p>
+                <div className="mt-4">
+                  <p className="text-xs uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>{b.is_credit_card ? 'Outstanding' : 'Balance'}</p>
+                  <p className="text-2xl font-bold tracking-tight mt-0.5" style={{ color: b.is_credit_card ? 'var(--text-danger)' : 'var(--text-primary)' }}>
+                    {formatCurrency(val, sym)}
+                  </p>
+                </div>
               </div>
             </button>
           );
@@ -170,16 +179,24 @@ export default function AccountsPage() {
       {/* Detail drawer */}
       {selected && (
         <div className="fixed inset-0 z-50 flex justify-end" style={{ background: 'var(--bg-overlay)' }} onClick={() => setSelectedId(null)}>
-          <div className="card h-full w-full max-w-md overflow-y-auto animate-fade-in-up rounded-none" onClick={e => e.stopPropagation()}>
-            {/* Header */}
-            <div className="flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-700">
-              <div>
-                <h2 className="text-lg font-semibold">{selected.account.name}</h2>
-                <p className="text-sm" style={{ color: selected.is_credit_card ? 'var(--text-danger)' : 'var(--text-secondary)' }}>
-                  {selected.is_credit_card ? 'Outstanding ' : 'Balance '}{formatCurrency(displayBalance(selected), sym)}
-                </p>
+          <div className="card h-full w-full max-w-md overflow-y-auto animate-slide-up rounded-none" onClick={e => e.stopPropagation()}>
+            {/* Header — tinted with the account's accent color */}
+            <div
+              className="flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-700"
+              style={{ backgroundImage: `linear-gradient(135deg, ${selMeta.color}26, ${selMeta.color}05)` }}
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="inline-flex items-center justify-center w-11 h-11 rounded-xl flex-shrink-0" style={{ background: `${selMeta.color}26`, color: selMeta.color }}>
+                  <SelIcon size={20} />
+                </span>
+                <div className="min-w-0">
+                  <h2 className="text-lg font-semibold truncate">{selected.account.name}</h2>
+                  <p className="text-sm font-medium" style={{ color: selected.is_credit_card ? 'var(--text-danger)' : 'var(--text-secondary)' }}>
+                    {selected.is_credit_card ? 'Outstanding ' : 'Balance '}{formatCurrency(displayBalance(selected), sym)}
+                  </p>
+                </div>
               </div>
-              <button onClick={() => setSelectedId(null)} className="btn-icon"><X size={18} /></button>
+              <button onClick={() => setSelectedId(null)} className="btn-icon flex-shrink-0"><X size={18} /></button>
             </div>
 
             {/* View toggle: Statement | Quick Add */}
@@ -195,7 +212,8 @@ export default function AccountsPage() {
                     <button
                       key={v.id}
                       onClick={() => setDrawerView(v.id)}
-                      className={`flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold transition-colors ${active ? 'bg-blue-600 text-white shadow-sm' : 'text-[color:var(--text-secondary)] hover:text-[color:var(--text-primary)]'}`}
+                      className={`flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold transition-colors ${active ? 'text-white shadow-sm' : 'text-[color:var(--text-secondary)] hover:text-[color:var(--text-primary)]'}`}
+                      style={active ? { background: selMeta.color } : undefined}
                     >
                       <VIcon size={15} /> {v.label}
                     </button>
@@ -289,7 +307,7 @@ export default function AccountsPage() {
                           <div className="flex items-center flex-wrap gap-x-1.5 gap-y-0.5 text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>
                             <span>Opening: {formatCurrency(0, accSym)}</span>
                             <span style={{ color: 'var(--text-muted)' }}>→ … →</span>
-                            <span className="font-semibold" style={{ color: isCC ? 'var(--text-danger)' : 'var(--text-primary)' }}>
+                            <span className="font-semibold px-2 py-0.5 rounded-md" style={{ background: isCC ? 'var(--text-danger)' : selMeta.color, color: '#fff' }}>
                               Current: {formatCurrency(finalRunning, accSym)}
                             </span>
                           </div>
@@ -312,19 +330,19 @@ export default function AccountsPage() {
                                 </tr>
                               </thead>
                               <tbody>
-                                {rows.map(e => {
+                                {rows.map((e, idx) => {
                                   const positive = e.delta >= 0;
                                   return (
-                                    <tr key={e.id} className="border-b border-slate-50 dark:border-slate-800 last:border-0 align-top">
-                                      <td className="py-1.5 pr-2 whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{formatDate(e.date)}</td>
-                                      <td className="py-1.5 pr-2">
+                                    <tr key={e.id} className="align-top" style={{ background: idx % 2 === 1 ? 'var(--bg-subtle)' : 'transparent' }}>
+                                      <td className="py-2 px-2 whitespace-nowrap rounded-l-md" style={{ color: 'var(--text-secondary)' }}>{formatDate(e.date)}</td>
+                                      <td className="py-2 pr-2">
                                         <span className="block truncate max-w-[10rem]">{e.label}</span>
                                         <span className="badge badge-gray text-[9px]">{e.type.replace(/_/g, ' ')}</span>
                                       </td>
-                                      <td className="py-1.5 pr-2 text-right whitespace-nowrap font-medium" style={{ color: positive ? 'var(--text-success)' : 'var(--text-danger)' }}>
+                                      <td className="py-2 pr-2 text-right whitespace-nowrap font-semibold" style={{ color: positive ? 'var(--text-success)' : 'var(--text-danger)' }}>
                                         {positive ? '+' : '−'}{formatCurrency(Math.abs(e.delta), accSym)}
                                       </td>
-                                      <td className="py-1.5 text-right whitespace-nowrap font-semibold">{formatCurrency(e.running, accSym)}</td>
+                                      <td className="py-2 px-2 text-right whitespace-nowrap font-bold rounded-r-md" style={{ color: 'var(--text-primary)' }}>{formatCurrency(e.running, accSym)}</td>
                                     </tr>
                                   );
                                 })}
