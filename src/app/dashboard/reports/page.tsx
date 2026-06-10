@@ -161,20 +161,26 @@ export default function ReportsPage() {
     </div>
   );
 
-  // Presentation-only accent KPI card used by the yearly/custom stat grids.
-  // accent = tailwind text-color class for the value + a matching tinted icon.
-  const StatCard = ({ label, value, accent, iconWrap, Icon }: {
-    label: string; value: number; accent: string; iconWrap: string;
-    Icon: typeof TrendingUp;
+  // Soft-tint accent KPI card — identical look to the dashboard KPI cards
+  // (accent-tinted bg + border + left strip + tinted icon + accent value).
+  const StatCard = ({ label, value, color, Icon }: {
+    label: string; value: number; color: string; Icon: typeof TrendingUp;
   }) => (
-    <div className="card card-p flex flex-col gap-2">
-      <div className="flex items-center justify-between">
+    <div
+      className="card card-p relative overflow-hidden flex flex-col gap-2"
+      style={{
+        background: `color-mix(in srgb, ${color} 12%, var(--bg-surface))`,
+        borderColor: `color-mix(in srgb, ${color} 28%, var(--border-default))`,
+      }}
+    >
+      <span className="absolute left-0 top-0 bottom-0 w-1 rounded-l-xl" style={{ background: color }} />
+      <div className="flex items-center justify-between relative z-10">
         <p className="kpi-label">{label}</p>
-        <span className={`flex-shrink-0 w-8 h-8 rounded-lg grid place-items-center ${iconWrap}`}>
-          <Icon size={16} className={accent}/>
+        <span className="flex-shrink-0 w-8 h-8 rounded-lg grid place-items-center" style={{ background: `${color}24`, color }}>
+          <Icon size={16}/>
         </span>
       </div>
-      <p className={`kpi-value ${accent}`}>{formatCurrency(value, sym)}</p>
+      <p className="kpi-value relative z-10" style={{ color }}>{formatCurrency(value, sym)}</p>
     </div>
   );
 
@@ -316,13 +322,13 @@ export default function ReportsPage() {
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
             {[
-              { label:'Total Income', value:yearlyStats.totalIncome, accent:'text-emerald-600 dark:text-emerald-400', iconWrap:'bg-emerald-100 dark:bg-emerald-900/30', Icon:TrendingUp },
-              { label:'Total Expense', value:yearlyStats.totalExpense, accent:'text-red-500 dark:text-red-400', iconWrap:'bg-red-100 dark:bg-red-900/30', Icon:TrendingDown },
-              { label:'Total Savings', value:yearlyStats.totalSavings, accent:'text-blue-600 dark:text-blue-400', iconWrap:'bg-blue-100 dark:bg-blue-900/30', Icon:Wallet },
-              { label:'CC Bills Paid', value:yearlyStats.ccBills, accent:'text-indigo-600 dark:text-indigo-400', iconWrap:'bg-indigo-100 dark:bg-indigo-900/30', Icon:Calendar },
-              { label:'Family Expense', value:yearlyStats.familyExpense, accent:'text-amber-600 dark:text-amber-400', iconWrap:'bg-amber-100 dark:bg-amber-900/30', Icon:Wallet },
+              { label:'Total Income', value:yearlyStats.totalIncome, color:'#10b981', Icon:TrendingUp },
+              { label:'Total Expense', value:yearlyStats.totalExpense, color:'#ef4444', Icon:TrendingDown },
+              { label:'Total Savings', value:yearlyStats.totalSavings, color:'#3b82f6', Icon:Wallet },
+              { label:'CC Bills Paid', value:yearlyStats.ccBills, color:'#6366f1', Icon:Calendar },
+              { label:'Family Expense', value:yearlyStats.familyExpense, color:'#f59e0b', Icon:Wallet },
             ].map(item => (
-              <StatCard key={item.label} label={item.label} value={item.value} accent={item.accent} iconWrap={item.iconWrap} Icon={item.Icon}/>
+              <StatCard key={item.label} label={item.label} value={item.value} color={item.color} Icon={item.Icon}/>
             ))}
           </div>
 
@@ -419,13 +425,13 @@ export default function ReportsPage() {
 
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
             {[
-              { label:'Income', value:customStats.totalIncome, accent:'text-emerald-600 dark:text-emerald-400', iconWrap:'bg-emerald-100 dark:bg-emerald-900/30', Icon:TrendingUp },
-              { label:'Expense', value:customStats.totalExpense, accent:'text-red-500 dark:text-red-400', iconWrap:'bg-red-100 dark:bg-red-900/30', Icon:TrendingDown },
-              { label:'Savings', value:customStats.totalSavings, accent:'text-blue-600 dark:text-blue-400', iconWrap:'bg-blue-100 dark:bg-blue-900/30', Icon:Wallet },
-              { label:'CC Bills', value:customStats.ccBills, accent:'text-indigo-600 dark:text-indigo-400', iconWrap:'bg-indigo-100 dark:bg-indigo-900/30', Icon:Calendar },
-              { label:'Net Cashflow', value:customStats.netCashflow, accent:customStats.netCashflow>=0?'text-emerald-600 dark:text-emerald-400':'text-red-500 dark:text-red-400', iconWrap:customStats.netCashflow>=0?'bg-emerald-100 dark:bg-emerald-900/30':'bg-red-100 dark:bg-red-900/30', Icon:Wallet },
+              { label:'Income', value:customStats.totalIncome, color:'#10b981', Icon:TrendingUp },
+              { label:'Expense', value:customStats.totalExpense, color:'#ef4444', Icon:TrendingDown },
+              { label:'Savings', value:customStats.totalSavings, color:'#3b82f6', Icon:Wallet },
+              { label:'CC Bills', value:customStats.ccBills, color:'#6366f1', Icon:Calendar },
+              { label:'Net Cashflow', value:customStats.netCashflow, color:customStats.netCashflow>=0?'#10b981':'#ef4444', Icon:Wallet },
             ].map(item => (
-              <StatCard key={item.label} label={item.label} value={item.value} accent={item.accent} iconWrap={item.iconWrap} Icon={item.Icon}/>
+              <StatCard key={item.label} label={item.label} value={item.value} color={item.color} Icon={item.Icon}/>
             ))}
           </div>
 
