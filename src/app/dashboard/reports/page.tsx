@@ -194,6 +194,39 @@ export default function ReportsPage() {
 
   const COLORS = ['#3b82f6','#22c55e','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899','#14b8a6','#f97316','#6366f1'];
 
+  // Account-type accent colors (same palette as the Accounts page) for the
+  // soft-tint closing-balance cards.
+  const ROLE_COLOR: Record<string, string> = { cash:'#10b981', savings:'#3b82f6', investment:'#8b5cf6', family:'#f59e0b', credit_card:'#f43f5e' };
+
+  // Reusable "Closing Balances (All Time)" block — shown on every report tab so
+  // the actual balances are always visible. Native currency per account.
+  const closingBalancesCard = (
+    <div className="card card-p">
+      <CardHeader title="Closing Balances (All Time)" />
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        {balances.filter(b => b.account.is_active && b.account.include_in_dashboard).map(b => {
+          const acctSym = currencySymbol(b.account.currency || base);
+          const c = ROLE_COLOR[accountRole(b.account)] ?? '#10b981';
+          const isCC = b.is_credit_card;
+          const out = b.outstanding ?? 0;
+          return (
+            <div
+              key={b.account.id}
+              className="relative overflow-hidden rounded-xl border p-3"
+              style={{ background: `color-mix(in srgb, ${c} 10%, var(--bg-surface))`, borderColor: `color-mix(in srgb, ${c} 26%, var(--border-default))` }}
+            >
+              <span className="absolute left-0 top-0 bottom-0 w-1" style={{ background: c }} />
+              <p className="text-xs truncate" style={{ color: 'var(--text-muted)' }}>{b.account.name}</p>
+              <p className="text-sm font-bold mt-0.5" style={{ color: isCC ? (out > 0 ? '#ef4444' : 'var(--text-muted)') : (b.balance >= 0 ? '#10b981' : '#ef4444') }}>
+                {isCC ? `-${formatCurrency(out, acctSym)}` : formatCurrency(b.balance, acctSym)}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+
   return (
     <div className="space-y-5">
       <div className="page-header">
@@ -292,23 +325,7 @@ export default function ReportsPage() {
           </div>
 
           {/* Closing Balances */}
-          <div className="card card-p">
-            <CardHeader title="Closing Balances (All Time)" />
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-              {balances.filter(b => b.account.is_active && b.account.include_in_dashboard).map(b => {
-                // Native-currency display — each account in its own currency, not converted.
-                const acctSym = currencySymbol(b.account.currency || base);
-                return (
-                <div key={b.account.id} className="card card-p !p-3">
-                  <p className="text-xs truncate" style={{ color:'var(--text-muted)' }}>{b.account.name}</p>
-                  <p className={`text-sm font-bold mt-0.5 ${b.is_credit_card ? (b.outstanding??0)>0?'amount-negative':'text-slate-400' : b.balance>=0?'amount-positive':'amount-negative'}`}>
-                    {b.is_credit_card ? `-${formatCurrency(b.outstanding??0,acctSym)}` : formatCurrency(b.balance,acctSym)}
-                  </p>
-                </div>
-                );
-              })}
-            </div>
-          </div>
+          {closingBalancesCard}
         </div>
       )}
 
@@ -406,6 +423,9 @@ export default function ReportsPage() {
               }
             </div>
           </div>
+
+          {/* Closing Balances */}
+          {closingBalancesCard}
         </div>
       )}
 
@@ -459,6 +479,9 @@ export default function ReportsPage() {
               </table>
             </div>
           </div>
+
+          {/* Closing Balances */}
+          {closingBalancesCard}
         </div>
       )}
     </div>

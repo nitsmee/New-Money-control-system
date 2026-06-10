@@ -194,9 +194,9 @@ export default function AlertsPage() {
 
   // Presentation-only summary chips. Counts come straight from the lists above.
   const summaryChips = [
-    { label: 'Critical', count: errors.length, style: SEVERITY_STYLE.error, Icon: XCircle },
-    { label: 'Warnings', count: warnings.length, style: SEVERITY_STYLE.warning, Icon: AlertTriangle },
-    { label: 'Info', count: infos.length, style: SEVERITY_STYLE.info, Icon: Info },
+    { label: 'Critical', count: errors.length, color: '#ef4444', Icon: XCircle },
+    { label: 'Warnings', count: warnings.length, color: '#f59e0b', Icon: AlertTriangle },
+    { label: 'Info', count: infos.length, color: '#3b82f6', Icon: Info },
   ];
 
   // Single source of truth for rendering an alert card (used in every section).
@@ -292,13 +292,18 @@ export default function AlertsPage() {
       {visibleAlerts.length > 0 && (
         <div className="grid grid-cols-3 gap-3">
           {summaryChips.map(item => (
-            <div key={item.label} className="card card-p min-w-0 flex items-center gap-2 sm:gap-3">
-              <div className={`flex-shrink-0 w-9 h-9 sm:w-11 sm:h-11 rounded-full grid place-items-center ${item.style.iconWrap}`}>
-                <item.Icon size={20} className={item.style.icon}/>
+            <div
+              key={item.label}
+              className="card card-p relative overflow-hidden min-w-0 flex items-center gap-2 sm:gap-3"
+              style={{ background: `color-mix(in srgb, ${item.color} 12%, var(--bg-surface))`, borderColor: `color-mix(in srgb, ${item.color} 28%, var(--border-default))` }}
+            >
+              <span className="absolute left-0 top-0 bottom-0 w-1" style={{ background: item.color }} />
+              <div className="flex-shrink-0 w-9 h-9 sm:w-11 sm:h-11 rounded-full grid place-items-center" style={{ background: `${item.color}24`, color: item.color }}>
+                <item.Icon size={20}/>
               </div>
               <div className="min-w-0">
                 <p className="kpi-label truncate">{item.label}</p>
-                <p className={`text-2xl font-bold leading-none mt-1 ${item.style.icon}`}>{item.count}</p>
+                <p className="text-2xl font-bold leading-none mt-1" style={{ color: item.color }}>{item.count}</p>
               </div>
             </div>
           ))}

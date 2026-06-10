@@ -208,17 +208,11 @@ export default function BudgetPage() {
         )}
         {budgetStatuses.map(bs => {
           const pct = bs.monthly_budget > 0 ? Math.min(100, (bs.actual_till_date / bs.monthly_budget) * 100) : 0;
-          const statusColor = bs.status === 'red' ? '#ef4444' : bs.status === 'green' ? '#10b981' : '#f59e0b';
           return (
             <div
               key={bs.category}
               className="card card-p group relative overflow-hidden"
-              style={{
-                background: `color-mix(in srgb, ${statusColor} 10%, var(--bg-surface))`,
-                borderColor: `color-mix(in srgb, ${statusColor} 28%, var(--border-default))`,
-              }}
             >
-              <span className="absolute left-0 top-0 bottom-0 w-1 rounded-l-xl" style={{ background: statusColor }} />
               <div className="flex items-start justify-between gap-2 mb-3">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">

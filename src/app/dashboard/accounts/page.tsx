@@ -156,8 +156,6 @@ export default function AccountsPage() {
             >
               {/* Accent strip */}
               <span className="absolute left-0 top-0 bottom-0 w-1 rounded-l-xl" style={{ background: meta.color }} />
-              {/* Soft corner glow */}
-              <span className="absolute -top-8 -right-8 w-28 h-28 rounded-full pointer-events-none transition-transform duration-300 group-hover:scale-125" style={{ background: meta.color, opacity: 0.1 }} />
               <div className="relative z-10">
                 <div className="flex items-center gap-3">
                   <span className="inline-flex items-center justify-center w-11 h-11 rounded-xl flex-shrink-0" style={{ background: `${meta.color}24`, color: meta.color }}>

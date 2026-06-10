@@ -509,8 +509,13 @@ export default function SettingsPage() {
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {owners.map(o => (
-              <div key={o.id} className="card card-p flex items-center gap-3 group">
-                <div className="w-9 h-9 rounded-lg flex-shrink-0 flex items-center justify-center" style={{ background:o.color+'20', color:o.color }}>
+              <div
+                key={o.id}
+                className="card card-p relative overflow-hidden flex items-center gap-3 group"
+                style={{ background:`color-mix(in srgb, ${o.color} 10%, var(--bg-surface))`, borderColor:`color-mix(in srgb, ${o.color} 26%, var(--border-default))` }}
+              >
+                <span className="absolute left-0 top-0 bottom-0 w-1" style={{ background:o.color }} />
+                <div className="w-9 h-9 rounded-lg flex-shrink-0 flex items-center justify-center" style={{ background:o.color+'24', color:o.color }}>
                   <User size={16}/>
                 </div>
                 <div className="flex-1 min-w-0">
