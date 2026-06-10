@@ -223,7 +223,7 @@ export default function BudgetPage() {
                   </div>
                   {bs.budget_entry?.owner_purpose && <p className="text-xs mt-0.5 truncate" style={{ color: 'var(--text-muted)' }}>{bs.budget_entry.owner_purpose}</p>}
                 </div>
-                <div className="flex gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="flex gap-1 flex-shrink-0 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                   {bs.budget_entry && <button onClick={() => openEdit(bs.budget_entry!)} className="btn-icon text-slate-400 hover:text-blue-600"><Pencil size={13}/></button>}
                   {bs.budget_entry && <button onClick={() => handleDelete(bs.budget_entry!)} className="btn-icon text-slate-400 hover:text-red-600"><Trash2 size={13}/></button>}
                 </div>
@@ -289,7 +289,7 @@ export default function BudgetPage() {
       {/* Form Modal */}
       {showForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'var(--bg-overlay)' }}>
-          <div className="card w-full max-w-md animate-fade-in-up">
+          <div className="card w-full max-w-md max-h-[90vh] overflow-y-auto animate-fade-in-up">
             <div className="flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-700">
               <h2 className="text-lg font-semibold">{editing ? 'Edit Budget' : 'Add Budget'}</h2>
               <button onClick={() => setShowForm(false)} className="btn-icon"><X size={18}/></button>

@@ -713,7 +713,7 @@ export default function DashboardPage() {
                 )}
                 <div className="text-xs sm:text-sm truncate" style={{ color: 'var(--text-secondary)' }}>{c.label}</div>
               </div>
-              <Amount value={c.value} sym={sym} className="block text-xl sm:text-2xl font-bold mt-1.5" style={{ color: accent ? accent.color : 'var(--text-primary)' }} />
+              <Amount value={c.value} sym={sym} className="block text-xl sm:text-2xl font-bold mt-1.5 truncate" style={{ color: accent ? accent.color : 'var(--text-primary)' }} />
               <div className="text-[11px] sm:text-xs mt-1" style={{ color: 'var(--text-muted)' }}>{c.sub}</div>
               {showDelta && momDelta !== null && (
                 <div className={`text-xs mt-1.5 font-medium ${deltaGood ? 'text-emerald-600' : 'text-red-500'}`}>
@@ -842,7 +842,7 @@ export default function DashboardPage() {
         <div className="card card-p animate-fade-in-up">
           <h3 className="section-title text-base mb-4">Account Balances</h3>
           <div className="space-y-3">
-            {[...bankBalances.filter(b => b.account.include_in_dashboard), ...ccBalances.filter(b => (b.outstanding ?? 0) > 0)].map(b => {
+            {[...bankBalances.filter(b => b.account.include_in_dashboard !== false), ...ccBalances.filter(b => (b.outstanding ?? 0) > 0)].map(b => {
               // Each account is shown in ITS OWN native currency (never converted).
               const aSym = currencySymbol(b.account.currency || base);
               return (

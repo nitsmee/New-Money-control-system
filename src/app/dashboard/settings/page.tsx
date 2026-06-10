@@ -381,7 +381,7 @@ export default function SettingsPage() {
           </div>
           {showAccForm && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background:'var(--bg-overlay)' }}>
-              <div className="card w-full max-w-md animate-fade-in-up">
+              <div className="card w-full max-w-md max-h-[90vh] overflow-y-auto animate-fade-in-up">
                 <div className="flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-700">
                   <h2 className="text-lg font-semibold">{editingAcc?'Edit Account':'Add Account'}</h2>
                   <button onClick={() => setShowAccForm(false)} aria-label="Close" className="btn-icon"><X size={18}/></button>
@@ -465,7 +465,7 @@ export default function SettingsPage() {
           </div>
           {showCatForm && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background:'var(--bg-overlay)' }}>
-              <div className="card w-full max-w-md animate-fade-in-up">
+              <div className="card w-full max-w-md max-h-[90vh] overflow-y-auto animate-fade-in-up">
                 <div className="flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-700">
                   <h2 className="text-lg font-semibold">{editingCat?'Edit Category':'Add Category'}</h2>
                   <button onClick={() => setShowCatForm(false)} aria-label="Close" className="btn-icon"><X size={18}/></button>
@@ -523,7 +523,7 @@ export default function SettingsPage() {
                   {o.description && <p className="text-xs truncate" style={{ color:'var(--text-muted)' }}>{o.description}</p>}
                   {!o.is_active && <span className="badge badge-gray text-[10px]">Inactive</span>}
                 </div>
-                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="flex gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                   <button onClick={() => openEditOwner(o)} aria-label="Edit owner" className="btn-icon text-slate-400 hover:text-blue-600"><Pencil size={13}/></button>
                 </div>
               </div>
@@ -531,7 +531,7 @@ export default function SettingsPage() {
           </div>
           {showOwnerForm && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background:'var(--bg-overlay)' }}>
-              <div className="card w-full max-w-md animate-fade-in-up">
+              <div className="card w-full max-w-md max-h-[90vh] overflow-y-auto animate-fade-in-up">
                 <div className="flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-700">
                   <h2 className="text-lg font-semibold">{editingOwner?'Edit Owner':'Add Owner'}</h2>
                   <button onClick={() => setShowOwnerForm(false)} aria-label="Close" className="btn-icon"><X size={18}/></button>

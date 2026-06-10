@@ -105,7 +105,7 @@ export function QuickAddModal({ isOpen, onClose, onSaved }: Props) {
       onClick={onClose}
     >
       <div
-        className="card w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl"
+        className="card w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl max-h-[90dvh] overflow-y-auto"
         style={{ animation: 'slideUp 0.2s ease-out' }}
         onClick={e => e.stopPropagation()}
       >

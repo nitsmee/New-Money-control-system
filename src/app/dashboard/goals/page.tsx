@@ -333,7 +333,7 @@ export default function GoalsPage() {
                 <h3 className="font-bold text-base">{g.name}</h3>
                 {g.goal_type && <p className="text-xs" style={{ color:'var(--text-muted)' }}>{g.goal_type}</p>}
               </div>
-              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <div className="flex gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                 <button onClick={() => openEdit(g)} className="btn-icon text-slate-400 hover:text-blue-600"><Pencil size={13}/></button>
                 <button onClick={() => handleDelete(g)} className="btn-icon text-slate-400 hover:text-red-600"><Trash2 size={13}/></button>
               </div>

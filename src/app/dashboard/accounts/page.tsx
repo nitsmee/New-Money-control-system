@@ -57,6 +57,7 @@ export default function AccountsPage() {
   const selectedAccount = selected?.account ?? null;
   const selMeta = selectedAccount ? (ROLE_META[accountRole(selectedAccount)] ?? ROLE_META.cash) : ROLE_META.cash;
   const SelIcon = selMeta.Icon;
+  const selSym = currencySymbol(selectedAccount?.currency || (settings?.currency ?? 'INR'));
 
   // Full running-balance statement for the selected account (native currency, oldest → newest).
   const ledger = useMemo(
@@ -144,6 +145,7 @@ export default function AccountsPage() {
           const meta = ROLE_META[role] ?? ROLE_META.cash;
           const Icon = meta.Icon;
           const val = displayBalance(b);
+          const aSym = currencySymbol(b.account.currency || (settings?.currency ?? 'INR'));
           return (
             <button
               key={b.account.id}
@@ -168,8 +170,8 @@ export default function AccountsPage() {
                 </div>
                 <div className="mt-4">
                   <p className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>{b.is_credit_card ? 'Outstanding' : 'Balance'}</p>
-                  <p className="text-2xl font-bold tracking-tight mt-0.5" style={{ color: meta.color }}>
-                    {formatCurrency(val, sym)}
+                  <p className="text-2xl font-bold tracking-tight mt-0.5 truncate" style={{ color: meta.color }}>
+                    {formatCurrency(val, aSym)}
                   </p>
                 </div>
               </div>
@@ -197,7 +199,7 @@ export default function AccountsPage() {
                 <div className="min-w-0">
                   <h2 className="text-lg font-semibold truncate" style={{ color: 'var(--text-primary)' }}>{selected.account.name}</h2>
                   <p className="text-sm font-medium" style={{ color: selected.is_credit_card ? 'var(--text-danger)' : 'var(--text-secondary)' }}>
-                    {selected.is_credit_card ? 'Outstanding ' : 'Balance '}{formatCurrency(displayBalance(selected), sym)}
+                    {selected.is_credit_card ? 'Outstanding ' : 'Balance '}{formatCurrency(displayBalance(selected), selSym)}
                   </p>
                 </div>
               </div>

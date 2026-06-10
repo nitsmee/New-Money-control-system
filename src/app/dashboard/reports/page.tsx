@@ -204,7 +204,7 @@ export default function ReportsPage() {
     <div className="card card-p">
       <CardHeader title="Closing Balances (All Time)" />
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        {balances.filter(b => b.account.is_active && b.account.include_in_dashboard).map(b => {
+        {balances.filter(b => b.account.is_active && b.account.include_in_dashboard !== false).map(b => {
           const acctSym = currencySymbol(b.account.currency || base);
           const c = ROLE_COLOR[accountRole(b.account)] ?? '#10b981';
           const isCC = b.is_credit_card;

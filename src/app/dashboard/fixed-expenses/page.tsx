@@ -373,7 +373,7 @@ export default function FixedExpensesPage() {
                   {expired && <span className="badge badge-gray text-[10px]">Ended</span>}
                   {fe.auto_count && !expired && <span className="badge badge-blue text-[10px]"><Zap size={10} /> Auto</span>}
                 </div>
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                   {!expired && (
                     <button onClick={() => processNow(fe)} disabled={processing === fe.id} className="btn-icon text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-500/10" title="Post due entries now">
                       {processing === fe.id ? <span className="w-3.5 h-3.5 border-2 border-emerald-300 border-t-emerald-600 rounded-full animate-spin" /> : <Play size={14} />}
