@@ -33,7 +33,7 @@ export function OfflineBanner() {
     <div
       className="fixed bottom-20 sm:bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-2 rounded-full shadow-lg text-xs font-medium border"
       style={{
-        background: online ? 'var(--bg-primary, #fff)' : '#fffbeb',
+        background: online ? 'var(--bg-surface, #fff)' : '#fffbeb',
         borderColor: online ? 'var(--border-default, #e2e8f0)' : '#fcd34d',
         color: online ? 'var(--text-primary)' : '#92400e',
       }}

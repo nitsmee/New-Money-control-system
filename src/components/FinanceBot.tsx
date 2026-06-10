@@ -1348,7 +1348,7 @@ export function FinanceBot() {
             right: 16, bottom: 88,
             width: 'min(400px, calc(100vw - 24px))',
             height: 'min(560px, calc(100dvh - 120px))',
-            background: 'var(--bg-primary, #ffffff)', borderColor: 'var(--border-default, #e2e8f0)',
+            background: 'var(--bg-surface, #ffffff)', borderColor: 'var(--border-default, #e2e8f0)',
           }}
         >
           <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: 'var(--border-default, #e2e8f0)' }}>

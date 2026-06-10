@@ -64,7 +64,7 @@ export function MultiSelect({ value, onChange, options, placeholder, className }
       {open && (
         <div
           className="absolute z-50 mt-1 w-56 rounded-xl border shadow-xl overflow-hidden animate-fade-in-up"
-          style={{ background: 'var(--bg-primary, #fff)', borderColor: 'var(--border-default, #e2e8f0)' }}
+          style={{ background: 'var(--bg-surface, #fff)', borderColor: 'var(--border-default, #e2e8f0)' }}
         >
           <div className="p-2 border-b" style={{ borderColor: 'var(--border-default, #e2e8f0)' }}>
             <div className="flex items-center gap-2 px-2 py-1 rounded-lg" style={{ background: 'var(--bg-subtle, #f8fafc)' }}>

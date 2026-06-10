@@ -554,7 +554,7 @@ export default function DashboardPage() {
             <CurrencySelect value={displayCur} onChange={setDisplayCur} options={currenciesInUse} />
           )}
           {/* Flexible period control: preset + (monthly month/year) or (custom From/To) */}
-          <div className="inline-flex items-center gap-1.5 rounded-lg px-1.5 py-1 border" style={{ borderColor: 'var(--border-default)', background: 'var(--bg-secondary, transparent)' }}>
+          <div className="inline-flex items-center gap-1.5 rounded-lg px-1.5 py-1 border" style={{ borderColor: 'var(--border-default)', background: 'transparent' }}>
             <CalendarRange size={15} style={{ color: 'var(--text-muted)' }} className="ml-1 flex-shrink-0" />
             <select className="form-select text-sm py-1.5 px-2 pr-7 w-auto border-0 bg-transparent" value={datePreset} onChange={e => applyDatePreset(e.target.value as DatePreset)} title="Quick period">
               {DATE_PRESETS.map(p => <option key={p} value={p}>{p}</option>)}
