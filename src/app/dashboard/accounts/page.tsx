@@ -3,7 +3,8 @@ import { useState, useMemo } from 'react';
 import { useAppStore } from '@/lib/store/appStore';
 import { createClient } from '@/lib/supabase/client';
 import { Transaction } from '@/types';
-import { calculateAccountBalances, accountRole, formatCurrency, formatDate, accountLedger, currencySymbol } from '@/lib/utils/calculations';
+import { calculateAccountBalances, accountRole, formatCurrency, formatDate, accountLedger, currencySymbol, checkEntryWarnings } from '@/lib/utils/calculations';
+import { useConfirm } from '@/components/ConfirmDialog';
 import toast from 'react-hot-toast';
 import { Plus, X, Check, Receipt, Wallet, PiggyBank, TrendingUp, Users, CreditCard } from 'lucide-react';
 
@@ -23,6 +24,7 @@ const ROLE_META: Record<string, { label: string; Icon: any; color: string }> = {
 export default function AccountsPage() {
   const { accounts, income, transactions, categories, owners, addTransaction, settings } = useAppStore();
   const sb = createClient();
+  const confirm = useConfirm();
   const sym = settings?.currency_symbol ?? '₹';
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -90,6 +92,21 @@ export default function AccountsPage() {
     if (!qa.date || !qa.amount || qa.amount <= 0) { toast.error('Enter a valid amount'); return; }
     if (qa.type === 'expense' && !qa.category) { toast.error('Pick a category'); return; }
     if ((qa.type === 'transfer' || qa.type === 'saving') && !qa.to_account_id) { toast.error('Pick a destination account'); return; }
+    // Soft overdraft / credit-limit warning — warn, never block.
+    const wbase = settings?.currency ?? 'INR';
+    const warns = checkEntryWarnings({ type: qa.type, amount: +qa.amount, from_account_id: selectedId, to_account_id: qa.type === 'expense' ? null : (qa.to_account_id || null) }, balances, wbase);
+    if (warns.length > 0) {
+      const w = warns[0];
+      const wsym = currencySymbol(w.currency);
+      const ok = await confirm({
+        title: w.kind === 'overdraft' ? `Overdraw ${w.accountName}?` : `Over ${w.accountName} limit?`,
+        message: w.kind === 'overdraft'
+          ? `This will take ${w.accountName} to ${formatCurrency(w.projected, wsym)} (currently ${formatCurrency(w.current, wsym)}). You can proceed now and adjust it later.`
+          : `This will put ${w.accountName} at ${formatCurrency(w.projected, wsym)} — over its ${formatCurrency(w.limit ?? 0, wsym)} limit.`,
+        confirmLabel: 'Proceed anyway',
+      });
+      if (!ok) return;
+    }
     setSaving(true);
     try {
       const { data: { user } } = await sb.auth.getUser();

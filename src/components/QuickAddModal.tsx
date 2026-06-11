@@ -5,6 +5,8 @@ import toast from 'react-hot-toast';
 import { createClient } from '@/lib/supabase/client';
 import { useAppStore } from '@/lib/store/appStore';
 import { isOnline, offlineQueue } from '@/lib/offline';
+import { calculateAccountBalances, checkEntryWarnings, currencySymbol, formatCurrency } from '@/lib/utils/calculations';
+import { useConfirm } from '@/components/ConfirmDialog';
 import type { Transaction } from '@/types';
 
 interface Props {
@@ -29,7 +31,8 @@ export function QuickAddModal({ isOpen, onClose, onSaved }: Props) {
 
   const [toAccountId, setToAccountId] = useState('');
 
-  const { accounts } = useAppStore();
+  const { accounts, income, transactions, settings } = useAppStore();
+  const confirm = useConfirm();
   const activeAccounts = accounts.filter(a => a.is_active && !a.is_credit_card);
 
   // Savings accounts: prefer include_in_goal_savings or 'saving' in account_type; fall back to all non-CC
@@ -51,6 +54,22 @@ export function QuickAddModal({ isOpen, onClose, onSaved }: Props) {
     if (type === 'saving' && !toAccountId) {
       toast.error('Please select a savings account');
       return;
+    }
+    // Soft overdraft / credit-limit warning — warn, never block.
+    const base = settings?.currency ?? 'INR';
+    const balances = calculateAccountBalances(accounts, income, transactions, settings?.exchange_rates, base);
+    const warns = checkEntryWarnings({ type, amount: amt, from_account_id: fromAccountId, to_account_id: type === 'saving' ? (toAccountId || null) : null }, balances, base);
+    if (warns.length > 0) {
+      const w = warns[0];
+      const wsym = currencySymbol(w.currency);
+      const ok = await confirm({
+        title: w.kind === 'overdraft' ? `Overdraw ${w.accountName}?` : `Over ${w.accountName} limit?`,
+        message: w.kind === 'overdraft'
+          ? `This will take ${w.accountName} to ${formatCurrency(w.projected, wsym)} (currently ${formatCurrency(w.current, wsym)}). You can proceed now and adjust it later.`
+          : `This will put ${w.accountName} at ${formatCurrency(w.projected, wsym)} — over its ${formatCurrency(w.limit ?? 0, wsym)} limit.`,
+        confirmLabel: 'Proceed anyway',
+      });
+      if (!ok) return;
     }
     setSaving(true);
     try {
