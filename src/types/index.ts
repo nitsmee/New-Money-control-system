@@ -69,6 +69,8 @@ export interface Account {
   include_in_goal_savings: boolean;
   is_credit_card: boolean;
   is_spendable: boolean;
+  credit_limit?: number | null;   // credit cards: used for over-limit warnings (null = no limit set)
+  overdraft_warn?: boolean;       // normal accounts: warn when balance would go negative (default true)
   notes?: string;
   sort_order: number;
   created_at: string;

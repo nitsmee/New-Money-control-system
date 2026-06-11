@@ -4,7 +4,7 @@ import { useAppStore } from '@/lib/store/appStore';
 import { createClient } from '@/lib/supabase/client';
 import { Transaction, Income, TransactionType, TRANSACTION_TYPES } from '@/types';
 import Link from 'next/link';
-import { formatCurrency, currencySymbol, convertAmount, runningBalanceByEntry, formatTime } from '@/lib/utils/calculations';
+import { formatCurrency, currencySymbol, convertAmount, runningBalanceByEntry, formatTime, calculateAccountBalances, checkEntryWarnings } from '@/lib/utils/calculations';
 import { useDisplayCurrency } from '@/lib/useDisplayCurrency';
 import { format, endOfMonth, startOfMonth, subMonths, startOfYear, endOfYear, subYears } from 'date-fns';
 import toast from 'react-hot-toast';
@@ -115,6 +115,12 @@ export default function TransactionsPage() {
   // (not the filtered/paged subset). Keyed by transaction id.
   const runningMap = useMemo(
     () => runningBalanceByEntry(accounts, income, transactions, rates, base),
+    [accounts, income, transactions, rates, base]
+  );
+
+  // Current native balances per account — used for overdraft / credit-limit warnings.
+  const balances = useMemo(
+    () => calculateAccountBalances(accounts, income, transactions, rates, base),
     [accounts, income, transactions, rates, base]
   );
 
@@ -380,6 +386,21 @@ export default function TransactionsPage() {
         // as false (manual entry).
         const id = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
         const addPayload = { ...payload, id, is_fixed_expense_auto: false };
+        // Soft balance-limit warning — overdraw a normal account / go over a card limit.
+        // Warn, never block: you can proceed (e.g. virtual accounts) and adjust later.
+        const warns = checkEntryWarnings(addPayload, balances, base);
+        if (warns.length > 0) {
+          const w = warns[0];
+          const wsym = currencySymbol(w.currency);
+          const ok = await confirm({
+            title: w.kind === 'overdraft' ? `Overdraw ${w.accountName}?` : `Over ${w.accountName} limit?`,
+            message: w.kind === 'overdraft'
+              ? `This will take ${w.accountName} to ${formatCurrency(w.projected, wsym)} (currently ${formatCurrency(w.current, wsym)}). You can proceed now and adjust it later.`
+              : `This will put ${w.accountName} at ${formatCurrency(w.projected, wsym)} — over its ${formatCurrency(w.limit ?? 0, wsym)} limit.`,
+            confirmLabel: 'Proceed anyway',
+          });
+          if (!ok) { setSaving(false); return; }
+        }
         // Duplicate check (new transactions only)
         const threeDaysAgo = new Date();
         threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);

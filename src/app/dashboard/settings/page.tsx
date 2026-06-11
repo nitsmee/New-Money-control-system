@@ -51,10 +51,10 @@ export default function SettingsPage() {
   const [showAccForm, setShowAccForm] = useState(false);
   const [editingAcc, setEditingAcc] = useState<Account|null>(null);
   const baseCurrency = settings?.currency ?? 'INR';
-  const [accForm, setAccForm] = useState({ name:'', account_type:'Bank Account', currency: baseCurrency, owner_purpose:'', is_active:true, include_in_dashboard:true, include_in_goal_savings:false, is_credit_card:false, is_spendable:true, notes:'' });
+  const [accForm, setAccForm] = useState({ name:'', account_type:'Bank Account', currency: baseCurrency, owner_purpose:'', is_active:true, include_in_dashboard:true, include_in_goal_savings:false, is_credit_card:false, is_spendable:true, credit_limit:0, overdraft_warn:true, notes:'' });
 
-  const openNewAcc = () => { setEditingAcc(null); setAccForm({ name:'', account_type:'Bank Account', currency: baseCurrency, owner_purpose:'', is_active:true, include_in_dashboard:true, include_in_goal_savings:false, is_credit_card:false, is_spendable:true, notes:'' }); setShowAccForm(true); };
-  const openEditAcc = (a: Account) => { setEditingAcc(a); setAccForm({ name:a.name, account_type:a.account_type, currency: a.currency ?? baseCurrency, owner_purpose:a.owner_purpose??'', is_active:a.is_active, include_in_dashboard:a.include_in_dashboard, include_in_goal_savings:a.include_in_goal_savings, is_credit_card:a.is_credit_card, is_spendable:a.is_spendable, notes:a.notes??'' }); setShowAccForm(true); };
+  const openNewAcc = () => { setEditingAcc(null); setAccForm({ name:'', account_type:'Bank Account', currency: baseCurrency, owner_purpose:'', is_active:true, include_in_dashboard:true, include_in_goal_savings:false, is_credit_card:false, is_spendable:true, credit_limit:0, overdraft_warn:true, notes:'' }); setShowAccForm(true); };
+  const openEditAcc = (a: Account) => { setEditingAcc(a); setAccForm({ name:a.name, account_type:a.account_type, currency: a.currency ?? baseCurrency, owner_purpose:a.owner_purpose??'', is_active:a.is_active, include_in_dashboard:a.include_in_dashboard, include_in_goal_savings:a.include_in_goal_savings, is_credit_card:a.is_credit_card, is_spendable:a.is_spendable, credit_limit:a.credit_limit ?? 0, overdraft_warn:a.overdraft_warn ?? true, notes:a.notes??'' }); setShowAccForm(true); };
 
   const hasTransactions = (accId: string) =>
     transactions.some(t => t.from_account_id===accId || t.to_account_id===accId) ||
@@ -65,7 +65,7 @@ export default function SettingsPage() {
     try {
       const { data: { user } } = await sb.auth.getUser();
       if (!user) return;
-      const payload = { ...accForm, name:accForm.name.trim(), user_id:user.id };
+      const payload = { ...accForm, name:accForm.name.trim(), credit_limit: accForm.credit_limit > 0 ? accForm.credit_limit : null, user_id:user.id };
       if (editingAcc) {
         const { data, error } = await sb.from('accounts').update(payload).eq('id',editingAcc.id).select().single();
         if (error) throw error;
@@ -421,6 +421,18 @@ export default function SettingsPage() {
                       </label>
                     ))}
                   </div>
+                  {accForm.is_credit_card ? (
+                    <div className="form-group">
+                      <label className="form-label">Credit limit</label>
+                      <input type="number" className="form-input" placeholder="0 = no limit" min="0" step="1" value={accForm.credit_limit || ''} onChange={e => { const n = parseFloat(e.target.value); setAccForm({ ...accForm, credit_limit: Number.isFinite(n) && n >= 0 ? n : 0 }); }}/>
+                      <p className="form-hint">Warn when a purchase would push the outstanding over this limit. Leave 0 for no limit.</p>
+                    </div>
+                  ) : (
+                    <label className="flex items-center gap-2 cursor-pointer text-sm">
+                      <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={accForm.overdraft_warn} onChange={e => setAccForm({ ...accForm, overdraft_warn: e.target.checked })}/>
+                      Warn me before this account goes negative
+                    </label>
+                  )}
                   <div className="form-group">
                     <label className="form-label">Notes</label>
                     <textarea className="form-textarea" rows={2} placeholder="Optional" value={accForm.notes} onChange={e => setAccForm({...accForm, notes:e.target.value})}/>

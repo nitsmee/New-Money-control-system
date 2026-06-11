@@ -954,6 +954,66 @@ export function runningBalanceByEntry(
 }
 
 // ============================================================
+// BALANCE-LIMIT WARNINGS (soft validation — warn, never block)
+// Returns warnings if a NEW entry would overdraw a normal account
+// (projected balance < 0, unless the account's overdraft_warn is false) or push
+// a credit card over its credit_limit. Forward-compatible: credit_limit /
+// overdraft_warn are optional and simply skipped when unset.
+// ============================================================
+export interface EntryWarning {
+  kind: 'overdraft' | 'over_limit';
+  accountId: string;
+  accountName: string;
+  currency: string;
+  current: number;    // current balance (overdraft) or outstanding (over_limit)
+  amount: number;     // the entry amount
+  projected: number;  // resulting balance / outstanding
+  limit?: number;     // credit limit (over_limit only)
+}
+
+export function checkEntryWarnings(
+  entry: { type: string; amount: number; from_account_id?: string | null; to_account_id?: string | null },
+  balances: AccountBalance[],
+  baseCurrency = 'INR',
+): EntryWarning[] {
+  const amt = +entry.amount || 0;
+  if (amt <= 0) return [];
+  const byId = new Map(balances.map(b => [b.account.id, b]));
+  const out: EntryWarning[] = [];
+  const fromB = entry.from_account_id ? byId.get(entry.from_account_id) : undefined;
+  const debits = entry.type === 'expense' || entry.type === 'transfer' || entry.type === 'saving' || entry.type === 'credit_card_payment';
+
+  if (fromB && debits) {
+    const cur = fromB.account.currency || baseCurrency;
+    if (fromB.is_credit_card) {
+      // Spending on a credit card raises what you owe → over-limit check.
+      if (entry.type === 'expense') {
+        const limit = fromB.account.credit_limit ?? 0;
+        const projected = (fromB.outstanding ?? 0) + amt;
+        if (limit > 0 && projected > limit) {
+          out.push({ kind: 'over_limit', accountId: fromB.account.id, accountName: fromB.account.name, currency: cur, current: fromB.outstanding ?? 0, amount: amt, projected, limit });
+        }
+      }
+    } else if (fromB.account.overdraft_warn !== false) {
+      // Normal account: balance decreases.
+      const projected = fromB.balance - amt;
+      if (projected < 0) {
+        out.push({ kind: 'overdraft', accountId: fromB.account.id, accountName: fromB.account.name, currency: cur, current: fromB.balance, amount: amt, projected });
+      }
+    }
+  }
+
+  // Setting an opening credit-card balance above its limit.
+  if (entry.type === 'initial_cc_outstanding' && fromB?.is_credit_card) {
+    const limit = fromB.account.credit_limit ?? 0;
+    if (limit > 0 && amt > limit) {
+      out.push({ kind: 'over_limit', accountId: fromB.account.id, accountName: fromB.account.name, currency: fromB.account.currency || baseCurrency, current: 0, amount: amt, projected: amt, limit });
+    }
+  }
+  return out;
+}
+
+// ============================================================
 // MONTH-OVER-MONTH COMPARISON
 // ============================================================
 export function getMonthTotals(
