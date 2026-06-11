@@ -3,7 +3,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { useAppStore } from '@/lib/store/appStore';
 import { createClient } from '@/lib/supabase/client';
 import { Goal } from '@/types';
-import { calculateAccountBalances, analyzeGoal, formatCurrency, currencySymbol, convertAmount } from '@/lib/utils/calculations';
+import { calculateAccountBalances, analyzeGoal, formatCurrency, formatDate, currencySymbol, convertAmount } from '@/lib/utils/calculations';
 import { useDisplayCurrency } from '@/lib/useDisplayCurrency';
 import toast from 'react-hot-toast';
 import { Plus, Pencil, Trash2, X, Check, Target, CheckCircle, AlertTriangle, Clock, TrendingUp, Flag, Sparkles, SlidersHorizontal } from 'lucide-react';
@@ -373,7 +373,7 @@ export default function GoalsPage() {
               {!can_buy_now && months_needed < 9999 && (
                 <div className="flex justify-between"><span>Months Needed</span><span className="font-medium">{months_needed} months (~{(months_needed/12).toFixed(1)} yrs)</span></div>
               )}
-              {g.planned_purchase_date && <div className="flex justify-between"><span>Target Date</span><span className="font-medium">{g.planned_purchase_date}</span></div>}
+              {g.planned_purchase_date && <div className="flex justify-between"><span>Target Date</span><span className="font-medium">{formatDate(g.planned_purchase_date)}</span></div>}
             </div>
 
             {/* Visual timeline: Now → Target with a projected-ready marker */}
@@ -435,7 +435,7 @@ export default function GoalsPage() {
                 </div>
                 <div className="form-group">
                   <label className="form-label">Target Purchase Date</label>
-                  <input type="date" className="form-input" value={form.planned_purchase_date??''} onChange={e => setForm({...form, planned_purchase_date:e.target.value||undefined})} />
+                  <input type="date" className="form-input" min={new Date().toISOString().split('T')[0]} value={form.planned_purchase_date??''} onChange={e => setForm({...form, planned_purchase_date:e.target.value||undefined})} />
                 </div>
               </div>
               <div className="form-group">

@@ -142,6 +142,7 @@ export function QuickAddModal({ isOpen, onClose, onSaved }: Props) {
               type="date"
               className="form-input"
               value={date}
+              max={today}
               onChange={e => setDate(e.target.value)}
             />
           </div>
@@ -155,7 +156,7 @@ export function QuickAddModal({ isOpen, onClose, onSaved }: Props) {
               placeholder="0.00"
               value={amount}
               onChange={e => setAmount(e.target.value)}
-              min="0"
+              min="0.01"
               step="0.01"
             />
           </div>

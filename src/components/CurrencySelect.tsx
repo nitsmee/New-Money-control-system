@@ -23,9 +23,11 @@ export function CurrencySelect({ value, onChange, options, className, placeholde
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
     document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
     setTimeout(() => inputRef.current?.focus(), 30);
-    return () => document.removeEventListener('mousedown', onDoc);
+    return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
   }, [open]);
 
   const ql = q.trim().toLowerCase();

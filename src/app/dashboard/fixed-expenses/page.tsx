@@ -39,6 +39,7 @@ export default function FixedExpensesPage() {
   const base = settings?.currency ?? 'INR';
   const rates = settings?.exchange_rates;
   const today = new Date();
+  const todayStr = new Date().toISOString().split('T')[0];
   const currentPeriod = getCurrentPeriod();
 
   // Current balance of every account (native currency), so each card can show
@@ -61,12 +62,12 @@ export default function FixedExpensesPage() {
   const totals = useMemo(() => {
     const t = { expense: 0, saving: 0, investment: 0, transfer: 0, all: 0 };
     active.forEach(fe => {
-      if (fe.end_date && new Date(fe.end_date) < today) return;
+      if (fe.end_date && fe.end_date < todayStr) return;
       t[fe.type] += fe.amount;
       t.all += fe.amount;
     });
     return t;
-  }, [active, today]);
+  }, [active, todayStr]);
 
   // ---- Auto-processing: back-fill missed months + post newly-due ones ----
   const runCatchUp = async (opts?: { confirmLarge?: boolean; silent?: boolean }) => {
@@ -125,6 +126,8 @@ export default function FixedExpensesPage() {
 
   const handleSave = async () => {
     if (!form.name || !form.amount || !form.due_day) { toast.error('Name, amount, and due day are required'); return; }
+    if (!(+form.amount > 0)) { toast.error('Amount must be greater than 0'); return; }
+    if (form.end_date && form.end_date < form.start_date) { toast.error('End date must be after start date'); return; }
     if (form.due_day < 1 || form.due_day > 31) { toast.error('Due day must be between 1 and 31'); return; }
     if (!form.from_account_id) { toast.error('Please select a "From Account"'); return; }
     if ((form.type === 'saving' || form.type === 'investment' || form.type === 'transfer') && !form.to_account_id) {
@@ -189,7 +192,7 @@ export default function FixedExpensesPage() {
     } catch (e: any) { toast.error(e.message); }
   };
 
-  const isExpired = (fe: FixedExpense) => !!fe.end_date && new Date(fe.end_date) < today;
+  const isExpired = (fe: FixedExpense) => !!fe.end_date && fe.end_date < todayStr;
   const postedThisPeriod = (fe: FixedExpense) => transactions.some(t => t.fixed_expense_id === fe.id && t.period === currentPeriod);
 
   return (
@@ -297,7 +300,7 @@ export default function FixedExpensesPage() {
                 </div>
                 <div className="form-group">
                   <label className="form-label">End Date (for EMIs etc.)</label>
-                  <input type="date" className="form-input" value={form.end_date ?? ''} onChange={e => setForm({ ...form, end_date: e.target.value || undefined })} />
+                  <input type="date" className="form-input" value={form.end_date ?? ''} onChange={e => setForm({ ...form, end_date: e.target.value || undefined })} min={form.start_date} />
                   <p className="form-hint">Leave blank for ongoing</p>
                 </div>
               </div>

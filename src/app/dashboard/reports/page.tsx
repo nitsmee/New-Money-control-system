@@ -435,11 +435,11 @@ export default function ReportsPage() {
           <div className="flex items-center gap-3 flex-wrap">
             <div className="form-group">
               <label className="form-label">From</label>
-              <input type="date" className="form-input text-sm py-1.5" value={startDate} onChange={e => setStartDate(e.target.value)}/>
+              <input type="date" className="form-input text-sm py-1.5" value={startDate} max={endDate || undefined} onChange={e => { const v = e.target.value; setStartDate(v); if (v && endDate && v > endDate) setEndDate(v); }}/>
             </div>
             <div className="form-group">
               <label className="form-label">To</label>
-              <input type="date" className="form-input text-sm py-1.5" value={endDate} onChange={e => setEndDate(e.target.value)}/>
+              <input type="date" className="form-input text-sm py-1.5" value={endDate} min={startDate || undefined} onChange={e => { const v = e.target.value; setEndDate(v); if (v && startDate && v < startDate) setStartDate(v); }}/>
             </div>
           </div>
 
@@ -463,15 +463,20 @@ export default function ReportsPage() {
                   {customTx.length===0 && customIncome.length===0 && (
                     <tr><td colSpan={6} className="text-center py-8 text-sm" style={{ color:'var(--text-muted)' }}>No transactions in this date range</td></tr>
                   )}
-                  {customTx.map(t => (
-                    <tr key={t.id}>
-                      <td className="text-xs">{t.date}</td>
-                      <td><span className={`badge text-[10px] ${t.type==='expense'?'badge-red':t.type==='saving'?'badge-blue':'badge-gray'}`}>{t.type.replace(/_/g,' ')}</span></td>
-                      <td className="text-xs">{t.category??'—'}</td>
-                      <td className="text-xs">{t.description??'—'}</td>
-                      <td className="text-xs">{t.owner_purpose??'—'}</td>
-                      <td className={`text-right text-sm font-semibold ${t.type==='expense'?'amount-negative':t.type==='saving'?'text-blue-600':'amount-neutral'}`}>
-                        {t.type==='expense'?'-':''}{formatCurrency(t.amount,sym)}
+                  {[
+                    ...customTx.map(t => ({ kind: 'tx' as const, id: t.id, date: t.date, created_at: t.created_at ?? '', type: t.type as string, category: t.category, description: t.description, owner: t.owner_purpose, amount: t.amount })),
+                    ...customIncome.map(i => ({ kind: 'inc' as const, id: i.id, date: i.date, created_at: i.created_at ?? '', type: 'income', category: i.category, description: i.description ?? i.source, owner: i.owner_purpose, amount: i.amount })),
+                  ]
+                    .sort((a, b) => b.date.localeCompare(a.date) || b.created_at.localeCompare(a.created_at))
+                    .map(r => (
+                    <tr key={`${r.kind}-${r.id}`}>
+                      <td className="text-xs">{r.date}</td>
+                      <td><span className={`badge text-[10px] ${r.kind==='inc'?'badge-green':r.type==='expense'?'badge-red':r.type==='saving'?'badge-blue':'badge-gray'}`}>{r.kind==='inc'?'income':r.type.replace(/_/g,' ')}</span></td>
+                      <td className="text-xs">{r.category??'—'}</td>
+                      <td className="text-xs">{r.description??'—'}</td>
+                      <td className="text-xs">{r.owner??'—'}</td>
+                      <td className={`text-right text-sm font-semibold ${r.kind==='inc'?'text-emerald-600 dark:text-emerald-400':r.type==='expense'?'amount-negative':r.type==='saving'?'text-blue-600':'amount-neutral'}`}>
+                        {r.kind==='inc'?'+':r.type==='expense'?'-':''}{formatCurrency(r.amount,sym)}
                       </td>
                     </tr>
                   ))}

@@ -4,7 +4,7 @@ import { useAppStore } from '@/lib/store/appStore';
 import { createClient } from '@/lib/supabase/client';
 import { Transaction, Income, TransactionType, TRANSACTION_TYPES } from '@/types';
 import Link from 'next/link';
-import { formatCurrency, currencySymbol, convertAmount, runningBalanceByEntry } from '@/lib/utils/calculations';
+import { formatCurrency, currencySymbol, convertAmount, runningBalanceByEntry, formatTime } from '@/lib/utils/calculations';
 import { useDisplayCurrency } from '@/lib/useDisplayCurrency';
 import { format, endOfMonth, startOfMonth, subMonths, startOfYear, endOfYear, subYears } from 'date-fns';
 import toast from 'react-hot-toast';
@@ -52,7 +52,7 @@ const TYPE_COLOR: Record<TransactionType, string> = {
 
 // Quick date-range presets. A custom From/To range covers everything else
 // (a single month, several months, a whole year, etc.).
-const DATE_PRESETS = ['This Month', 'Last Month', 'Last 3 Months', 'This Year', 'Last Year', 'All Time', 'Custom'];
+const DATE_PRESETS = ['Today', 'This Month', 'Last Month', 'Last 3 Months', 'This Year', 'Last Year', 'All Time', 'Custom'];
 
 // A unified table row: either a real transaction OR an income credit. Income is
 // shown here READ-ONLY (it's created/edited on the Income page) so that the
@@ -124,7 +124,8 @@ export default function TransactionsPage() {
     setDatePreset(p);
     const now = new Date();
     const f = (d: Date) => format(d, 'yyyy-MM-dd');
-    if (p === 'This Month') { setFromDate(f(startOfMonth(now))); setToDate(f(endOfMonth(now))); }
+    if (p === 'Today') { setFromDate(f(now)); setToDate(f(now)); }
+    else if (p === 'This Month') { setFromDate(f(startOfMonth(now))); setToDate(f(endOfMonth(now))); }
     else if (p === 'Last Month') { const d = subMonths(now, 1); setFromDate(f(startOfMonth(d))); setToDate(f(endOfMonth(d))); }
     else if (p === 'Last 3 Months') { setFromDate(f(startOfMonth(subMonths(now, 2)))); setToDate(f(endOfMonth(now))); }
     else if (p === 'This Year') { setFromDate(f(startOfYear(now))); setToDate(f(endOfYear(now))); }
@@ -438,9 +439,9 @@ export default function TransactionsPage() {
           <select className="form-select text-sm py-1.5 px-3 w-auto" value={datePreset} onChange={e => applyDatePreset(e.target.value)} title="Quick date range">
             {DATE_PRESETS.map(p => <option key={p} value={p}>{p}</option>)}
           </select>
-          <input type="date" className="form-input text-sm py-1.5 px-2 w-auto" value={fromDate} onChange={e => { setFromDate(e.target.value); setDatePreset('Custom'); }} title="From date" />
+          <input type="date" className="form-input text-sm py-1.5 px-2 w-auto" value={fromDate} max={toDate || undefined} onChange={e => { const v = e.target.value; setFromDate(v); if (v && toDate && v > toDate) setToDate(v); setDatePreset('Custom'); }} title="From date" />
           <span className="text-xs" style={{ color: 'var(--text-muted)' }}>to</span>
-          <input type="date" className="form-input text-sm py-1.5 px-2 w-auto" value={toDate} onChange={e => { setToDate(e.target.value); setDatePreset('Custom'); }} title="To date" />
+          <input type="date" className="form-input text-sm py-1.5 px-2 w-auto" value={toDate} min={fromDate || undefined} onChange={e => { const v = e.target.value; setToDate(v); if (v && fromDate && v < fromDate) setFromDate(v); setDatePreset('Custom'); }} title="To date" />
           <MultiSelect
             value={selTypes}
             onChange={setSelTypes}
@@ -586,7 +587,7 @@ export default function TransactionsPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="form-group">
                   <label className="form-label">Date *</label>
-                  <input type="date" className="form-input" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} />
+                  <input type="date" className="form-input" value={form.date} max={new Date().toISOString().split('T')[0]} onChange={e => setForm({ ...form, date: e.target.value })} />
                 </div>
                 <div className="form-group">
                   <label className="form-label">Amount *</label>
@@ -731,7 +732,7 @@ export default function TransactionsPage() {
                   return (
                     <tr key={`inc-${row.id}`}>
                       <td></td>
-                      <td className="text-xs whitespace-nowrap" style={{ color: 'var(--text-muted)' }}>{row.date}</td>
+                      <td className="text-xs whitespace-nowrap" style={{ color: 'var(--text-muted)' }}>{row.date}{row.created_at && <span className="block text-[10px] opacity-70">{formatTime(row.created_at)}</span>}</td>
                       <td className="max-w-xs text-sm">{row.description || row.source || 'Income'}</td>
                       <td><span className="badge text-[10px] badge-green">income</span></td>
                       <td className="text-xs">{row.category ?? '—'}</td>
@@ -767,7 +768,7 @@ export default function TransactionsPage() {
                         className="w-4 h-4 accent-blue-600"
                       />
                     </td>
-                    <td className="text-xs whitespace-nowrap" style={{ color: 'var(--text-muted)' }}>{tx.date}</td>
+                    <td className="text-xs whitespace-nowrap" style={{ color: 'var(--text-muted)' }}>{tx.date}{tx.created_at && <span className="block text-[10px] opacity-70">{formatTime(tx.created_at)}</span>}</td>
                     <td className="max-w-xs text-sm">{tx.description || tx.category || '—'}</td>
                     <td><span className={`badge text-[10px] ${TYPE_COLOR[tx.type]}`}>{tx.type.replace(/_/g, ' ')}</span></td>
                     <td className="text-xs">{tx.category ?? '—'}</td>

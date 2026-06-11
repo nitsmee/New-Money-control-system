@@ -88,6 +88,7 @@ export default function AccountsPage() {
   const handleQuickAdd = async () => {
     if (!selectedId) return;
     if (!qa.date || !qa.amount || qa.amount <= 0) { toast.error('Enter a valid amount'); return; }
+    if (qa.type === 'expense' && !qa.category) { toast.error('Pick a category'); return; }
     if ((qa.type === 'transfer' || qa.type === 'saving') && !qa.to_account_id) { toast.error('Pick a destination account'); return; }
     setSaving(true);
     try {
@@ -247,7 +248,7 @@ export default function AccountsPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div className="form-group">
                   <label className="form-label">Date</label>
-                  <input type="date" className="form-input" value={qa.date} onChange={e => setQa({ ...qa, date: e.target.value })} />
+                  <input type="date" className="form-input" max={new Date().toISOString().split('T')[0]} value={qa.date} onChange={e => setQa({ ...qa, date: e.target.value })} />
                 </div>
                 <div className="form-group">
                   <label className="form-label">Amount</label>
@@ -299,7 +300,7 @@ export default function AccountsPage() {
                   const base = settings?.currency ?? 'INR';
                   const accSym = currencySymbol(selectedAccount?.currency || base);
                   const isCC = !!selected.is_credit_card;
-                  const finalRunning = ledger.length ? ledger[ledger.length - 1].running : 0;
+                  const finalRunning = ledger.length ? (ledger[ledger.length - 1].running ?? 0) : 0;
                   const ROW_CAP = 300;
                   const display = [...ledger].reverse(); // newest → oldest, keeping each row's own running
                   const capped = display.length > ROW_CAP;
@@ -349,7 +350,7 @@ export default function AccountsPage() {
                                       <td className="py-2 pr-2 text-right whitespace-nowrap font-semibold" style={{ color: positive ? 'var(--text-success)' : 'var(--text-danger)' }}>
                                         {positive ? '+' : '−'}{formatCurrency(Math.abs(e.delta), accSym)}
                                       </td>
-                                      <td className="py-2 px-2 text-right whitespace-nowrap font-bold rounded-r-md" style={{ color: 'var(--text-primary)' }}>{formatCurrency(e.running, accSym)}</td>
+                                      <td className="py-2 px-2 text-right whitespace-nowrap font-bold rounded-r-md" style={{ color: 'var(--text-primary)' }}>{formatCurrency(e.running ?? 0, accSym)}</td>
                                     </tr>
                                   );
                                 })}

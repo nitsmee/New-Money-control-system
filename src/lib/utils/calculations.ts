@@ -711,6 +711,14 @@ export function formatDate(dateStr: string, fmt = 'dd-MMM-yyyy'): string {
   }
 }
 
+// Time-of-day from an ISO timestamp (e.g. created_at) → "2:45 PM". Empty if invalid.
+export function formatTime(iso?: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
 export function cn(...classes: (string | undefined | null | false)[]): string {
   return classes.filter(Boolean).join(' ');
 }

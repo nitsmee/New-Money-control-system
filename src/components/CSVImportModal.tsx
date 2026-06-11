@@ -28,6 +28,7 @@ function parseDate(val: string, fmt: DateFormat): string | null {
   if (!v) return null;
   // Helper: build & validate a YYYY-MM-DD from local parts (no UTC shift).
   const build = (year: number, month: number, day: number): string | null => {
+    if (year < 2000 || year > new Date().getFullYear() + 1) return null;
     if (month < 1 || month > 12 || day < 1 || day > 31) return null;
     const ymd = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     const d = new Date(year, month - 1, day);
@@ -128,7 +129,8 @@ export function CSVImportModal({ isOpen, onClose, onImported }: Props) {
     for (const row of rows) {
       const dateStr = parseDate(row[colMap.date] ?? '', dateFormat);
       const amt = parseFloat(row[colMap.amount] ?? '0');
-      if (!dateStr || isNaN(amt)) continue;
+      if (!dateStr || isNaN(amt) || amt === 0) continue;
+      if (!signedAmounts && amt < 0) continue;
       mapped.push({
         date: dateStr,
         amount: Math.abs(amt),

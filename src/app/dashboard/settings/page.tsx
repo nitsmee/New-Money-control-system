@@ -61,11 +61,11 @@ export default function SettingsPage() {
     income.some(i => i.to_account_id===accId);
 
   const saveAcc = async () => {
-    if (!accForm.name) { toast.error('Account name is required'); return; }
+    if (!accForm.name.trim()) { toast.error('Account name is required'); return; }
     try {
       const { data: { user } } = await sb.auth.getUser();
       if (!user) return;
-      const payload = { ...accForm, user_id:user.id };
+      const payload = { ...accForm, name:accForm.name.trim(), user_id:user.id };
       if (editingAcc) {
         const { data, error } = await sb.from('accounts').update(payload).eq('id',editingAcc.id).select().single();
         if (error) throw error;
@@ -105,11 +105,11 @@ export default function SettingsPage() {
   const hasCatTransactions = (name: string) => transactions.some(t => t.category===name) || income.some(i => i.category===name);
 
   const saveCat = async () => {
-    if (!catForm.name) { toast.error('Category name is required'); return; }
+    if (!catForm.name.trim()) { toast.error('Category name is required'); return; }
     try {
       const { data: { user } } = await sb.auth.getUser();
       if (!user) return;
-      const payload = { ...catForm, user_id:user.id, icon:'tag', default_account_id: catForm.default_account_id || null };
+      const payload = { ...catForm, name:catForm.name.trim(), user_id:user.id, icon:'tag', default_account_id: catForm.default_account_id || null };
       if (editingCat) {
         const { data, error } = await sb.from('categories').update(payload).eq('id',editingCat.id).select().single();
         if (error) throw error;
@@ -147,11 +147,11 @@ export default function SettingsPage() {
   const openEditOwner = (o: Owner) => { setEditingOwner(o); setOwnerForm({ name:o.name, description:o.description??'', color:o.color, is_active:o.is_active }); setShowOwnerForm(true); };
 
   const saveOwner = async () => {
-    if (!ownerForm.name) { toast.error('Name is required'); return; }
+    if (!ownerForm.name.trim()) { toast.error('Name is required'); return; }
     try {
       const { data: { user } } = await sb.auth.getUser();
       if (!user) return;
-      const payload = { ...ownerForm, user_id:user.id };
+      const payload = { ...ownerForm, name:ownerForm.name.trim(), user_id:user.id };
       if (editingOwner) {
         const { data, error } = await sb.from('owners').update(payload).eq('id',editingOwner.id).select().single();
         if (error) throw error;
@@ -293,6 +293,11 @@ export default function SettingsPage() {
       // bloated) rateForm — base is always pinned to 1.
       const merged: Record<string, number> = { [baseCurrency]: 1 };
       rateRowCurrencies.forEach(ccy => { merged[ccy] = rateForm[ccy] ?? 0; });
+      // Reject non-positive rates — a 0 rate silently disables currency conversion.
+      if (rateRowCurrencies.some(ccy => !(merged[ccy] > 0))) {
+        toast.error('Enter a rate greater than 0 for every currency');
+        return;
+      }
       await persistRates(merged);
       setRatesUpdatedAt(new Date().toISOString());
       toast.success('Exchange rates saved');
@@ -357,7 +362,7 @@ export default function SettingsPage() {
               <table className="data-table">
                 <thead><tr><th>Name</th><th>Type</th><th>Currency</th><th>Dashboard</th><th>Goal Savings</th><th>CC</th><th>Spendable</th><th>Status</th><th className="text-right">Actions</th></tr></thead>
                 <tbody>
-                  {accounts.map(a => (
+                  {[...accounts].sort((a,b)=>(b.created_at??'').localeCompare(a.created_at??'')).map(a => (
                     <tr key={a.id}>
                       <td className="font-medium text-sm">{a.name}</td>
                       <td className="text-xs">{a.account_type}</td>
@@ -602,7 +607,7 @@ export default function SettingsPage() {
             </div>
             <div className="form-group">
               <label className="form-label">Safe-to-Spend Buffer ({prefForm.currency_symbol})</label>
-              <input type="number" className="form-input" value={prefForm.safe_spend_buffer} onChange={e => setPrefForm({...prefForm, safe_spend_buffer:+e.target.value})} min="0" step="1000"/>
+              <input type="number" className="form-input" value={prefForm.safe_spend_buffer} onChange={e => { const n = parseFloat(e.target.value); setPrefForm({...prefForm, safe_spend_buffer: Number.isFinite(n) && n >= 0 ? n : 0}); }} min="0" step="1000"/>
               <p className="form-hint">Amount reserved from spendable balance as emergency buffer</p>
             </div>
             <h3 className="section-title text-base pt-2 border-t border-slate-100 dark:border-slate-700">Automation</h3>
@@ -683,7 +688,7 @@ export default function SettingsPage() {
                         <td>
                           <div className="flex items-center gap-2">
                             <span className="text-xs whitespace-nowrap" style={{ color:'var(--text-muted)' }}>1 {ccy} =</span>
-                            <input type="number" min="0" step="any" className="form-input w-32" value={rateForm[ccy] ?? 0} onChange={e => setRateForm(prev => ({ ...prev, [ccy]: +e.target.value }))}/>
+                            <input type="number" min="0.000001" step="any" className="form-input w-32" value={rateForm[ccy] ?? 0} onChange={e => { const n = parseFloat(e.target.value); setRateForm(p => ({ ...p, [ccy]: Number.isFinite(n) && n > 0 ? n : p[ccy] })); }}/>
                             <span className="text-xs whitespace-nowrap" style={{ color:'var(--text-muted)' }}>{baseCurrency}</span>
                           </div>
                         </td>

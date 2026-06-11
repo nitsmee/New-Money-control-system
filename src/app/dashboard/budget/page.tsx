@@ -99,7 +99,7 @@ export default function BudgetPage() {
   };
 
   const handleSave = async () => {
-    if (!form.category || form.monthly_budget < 0) { toast.error('Category and valid budget are required'); return; }
+    if (!form.category || !(form.monthly_budget > 0)) { toast.error('Enter a category and a budget greater than 0'); return; }
     setSaving(true);
     try {
       const { data: { user } } = await sb.auth.getUser();
@@ -304,7 +304,7 @@ export default function BudgetPage() {
               </div>
               <div className="form-group">
                 <label className="form-label">Monthly Budget Amount *</label>
-                <input type="number" className="form-input" placeholder="0" value={form.monthly_budget || ''} onChange={e => setForm({...form, monthly_budget: +e.target.value})} min="0" step="1" />
+                <input type="number" className="form-input" placeholder="0" value={form.monthly_budget || ''} onChange={e => { const n = parseFloat(e.target.value); setForm({ ...form, monthly_budget: Number.isFinite(n) ? n : 0 }); }} min="0" step="1" />
                 {form.monthly_budget > 0 && (
                   <p className="form-hint">Daily budget: {formatCurrency(form.monthly_budget / getDaysInMonth(new Date(selYear, selMonth - 1)), currencySymbol(base))}/day</p>
                 )}

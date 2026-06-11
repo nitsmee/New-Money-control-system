@@ -3,7 +3,7 @@ import { useMemo, useState, useEffect, useRef } from 'react';
 import { useAppStore } from '@/lib/store/appStore';
 import {
   calculateAccountBalances, calculateDashboardKPIs, calculateBudgetStatus,
-  buildMonthlyTrends, getCategorySpend, generateAlerts, formatCurrency, formatDate, accountRole, safeDueDate,
+  buildMonthlyTrends, getCategorySpend, generateAlerts, formatCurrency, formatDate, formatTime, accountRole, safeDueDate,
   currencySymbol, normalizeAmounts, convertAmount, YEAR_OPTIONS
 } from '@/lib/utils/calculations';
 import { useDisplayCurrency } from '@/lib/useDisplayCurrency';
@@ -29,7 +29,7 @@ const YEARS = YEAR_OPTIONS;
 // Quick date-range presets for the dashboard period control. "This Month" and
 // "Last Month" stay MONTHLY (so month-bound widgets + MoM chips keep working);
 // the range presets and "Custom" drive a custom from/to window.
-const DATE_PRESETS = ['This Month', 'Last Month', 'Last 3 Months', 'This Year', 'Last Year', 'Custom'] as const;
+const DATE_PRESETS = ['Today', 'This Month', 'Last Month', 'Last 3 Months', 'This Year', 'Last Year', 'Custom'] as const;
 type DatePreset = typeof DATE_PRESETS[number];
 const MONTHLY_PRESETS: DatePreset[] = ['This Month', 'Last Month'];
 
@@ -141,6 +141,8 @@ export default function DashboardPage() {
     } else if (p === 'Last Year') {
       const d = subYears(today, 1);
       setFromDate(fmt(startOfYear(d))); setToDate(fmt(endOfYear(d)));
+    } else if (p === 'Today') {
+      setFromDate(fmt(today)); setToDate(fmt(today));
     }
     // 'Custom' keeps whatever From/To are currently set.
   };
@@ -595,9 +597,9 @@ export default function DashboardPage() {
               </>
             ) : (
               <>
-                <input type="date" className="form-input text-sm py-1.5 px-2 w-auto border-0 bg-transparent" value={fromDate} onChange={e => { setFromDate(e.target.value); setDatePreset('Custom'); }} title="From date" />
+                <input type="date" className="form-input text-sm py-1.5 px-2 w-auto border-0 bg-transparent" value={fromDate} max={toDate || undefined} onChange={e => { const v = e.target.value; setFromDate(v); if (v && toDate && v > toDate) setToDate(v); setDatePreset('Custom'); }} title="From date" />
                 <span className="text-xs" style={{ color: 'var(--text-muted)' }}>to</span>
-                <input type="date" className="form-input text-sm py-1.5 px-2 w-auto border-0 bg-transparent" value={toDate} onChange={e => { setToDate(e.target.value); setDatePreset('Custom'); }} title="To date" />
+                <input type="date" className="form-input text-sm py-1.5 px-2 w-auto border-0 bg-transparent" value={toDate} min={fromDate || undefined} onChange={e => { const v = e.target.value; setToDate(v); if (v && fromDate && v < fromDate) setFromDate(v); setDatePreset('Custom'); }} title="To date" />
               </>
             )}
           </div>
@@ -900,7 +902,7 @@ export default function DashboardPage() {
             <tbody>
               {recentEntries.map(e => (
                 <tr key={`${e.kind}-${e.id}`}>
-                  <td className="text-xs whitespace-nowrap" style={{ color: 'var(--text-muted)' }}>{e.date}</td>
+                  <td className="text-xs whitespace-nowrap" style={{ color: 'var(--text-muted)' }}>{e.date}{e.created_at && <span className="block text-[10px] opacity-70">{formatTime(e.created_at)}</span>}</td>
                   <td className="max-w-xs"><span className="truncate block" style={{ maxWidth: 200 }}>{e.label}</span></td>
                   <td><span className="badge badge-gray text-[10px]">{e.category ?? '—'}</span></td>
                   <td><span className={`badge text-[10px] ${e.kind === 'income' ? 'badge-green' : e.type === 'expense' ? 'badge-red' : e.type === 'saving' ? 'badge-blue' : e.type === 'credit_card_payment' ? 'badge-yellow' : 'badge-gray'}`}>{e.kind === 'income' ? 'income' : e.type.replace(/_/g, ' ')}</span></td>

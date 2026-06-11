@@ -137,7 +137,9 @@ export default function RecurringIncomePage() {
     if (!form.name.trim()) { toast.error('Name is required'); return false; }
     if (!form.amount || form.amount <= 0) { toast.error('Amount must be greater than 0'); return false; }
     if (!form.due_day || form.due_day < 1 || form.due_day > 28) { toast.error('Due day must be between 1 and 28'); return false; }
+    if (!Number.isInteger(+form.due_day)) { toast.error('Due day must be a whole number'); return false; }
     if (!form.start_date) { toast.error('Start date is required'); return false; }
+    if (form.end_date && form.end_date < form.start_date) { toast.error('End date must be after start date'); return false; }
     return true;
   };
 
@@ -277,6 +279,7 @@ export default function RecurringIncomePage() {
                     onChange={e => setForm({ ...form, due_day: +e.target.value })}
                     min="1"
                     max="28"
+                    step="1"
                   />
                 </div>
               </div>
@@ -324,6 +327,7 @@ export default function RecurringIncomePage() {
                     className="form-input"
                     value={form.end_date}
                     onChange={e => setForm({ ...form, end_date: e.target.value })}
+                    min={form.start_date}
                   />
                   <p className="form-hint">Leave blank for ongoing</p>
                 </div>
@@ -403,7 +407,10 @@ export default function RecurringIncomePage() {
                 </tr>
               </thead>
               <tbody>
-                {[...active, ...inactive].map(ri => {
+                {(() => {
+                  const byNew = (a: RecurringIncome, b: RecurringIncome) => (b.created_at || '').localeCompare(a.created_at || '');
+                  return [...[...active].sort(byNew), ...[...inactive].sort(byNew)];
+                })().map(ri => {
                   const toAcc = accounts.find(a => a.id === ri.to_account_id);
                   // Live balance of the account this income lands in (native currency).
                   const toBal = balOf(ri.to_account_id);
