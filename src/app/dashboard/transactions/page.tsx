@@ -283,7 +283,8 @@ export default function TransactionsPage() {
   const getFromAccounts = () => {
     if (form.type === 'credit_card_payment') return nonCcAccounts;
     if (form.type === 'initial_cc_outstanding') return ccAccounts;
-    if (form.type === 'expense' || form.type === 'saving' || form.type === 'transfer') return activeAccounts;
+    if (form.type === 'saving') return nonCcAccounts;  // can't fund savings with credit
+    if (form.type === 'expense' || form.type === 'transfer') return activeAccounts;
     return activeAccounts;
   };
   const getToAccounts = () => {

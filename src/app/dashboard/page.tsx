@@ -276,7 +276,7 @@ export default function DashboardPage() {
       let nw = 0;
       bals.forEach(b => {
         if (!shown(b)) return;
-        if (b.is_credit_card) { nw -= (b.outstanding ?? 0); return; }
+        if (b.is_credit_card) { nw += b.balance; return; }  // signed: negative when owing, positive when overpaid (credit)
         const role = accountRole(b.account);
         if (role === 'family') return;            // exclude family/shared (matches dashboard net worth)
         nw += b.balance;                           // cash + savings + investment
@@ -308,7 +308,7 @@ export default function DashboardPage() {
   const familyBalances = useMemo(() => normBalances.filter(b => shown(b) && accountRole(b.account) === 'family'), [normBalances]);
   const investTotal = useMemo(() => investBalances.reduce((s, b) => s + b.balance, 0), [investBalances]);
   const familyTotal = useMemo(() => familyBalances.reduce((s, b) => s + b.balance, 0), [familyBalances]);
-  const netWorth = (kpis?.spendable_balance ?? 0) + (kpis?.savings_balance ?? 0) + investTotal - (kpis?.total_cc_outstanding ?? 0);
+  const netWorth = (kpis?.spendable_balance ?? 0) + (kpis?.savings_balance ?? 0) + investTotal - (kpis?.total_cc_outstanding ?? 0) + (kpis?.cc_credit_balance ?? 0);
   const buffer = settings?.safe_spend_buffer ?? 0;
   const spendable = kpis?.spendable_balance ?? 0;
   const upcoming = kpis?.upcoming_fixed_expenses ?? 0;

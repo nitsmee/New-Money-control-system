@@ -298,6 +298,7 @@ export interface DashboardKPIs {
   spendable_balance: number;
   savings_balance: number;
   total_cc_outstanding: number;
+  cc_credit_balance: number;   // total credit/overpayment held on credit cards (asset)
 
   // Period totals
   total_income: number;

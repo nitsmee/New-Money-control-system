@@ -333,7 +333,7 @@ export default function AccountsPage() {
                             <span>Opening: {formatCurrency(0, accSym)}</span>
                             <span style={{ color: 'var(--text-muted)' }}>→ … →</span>
                             <span className="font-semibold px-2 py-0.5 rounded-md" style={{ background: isCC ? 'var(--text-danger)' : selMeta.color, color: '#fff' }}>
-                              Current: {formatCurrency(finalRunning, accSym)}
+                              Current: {isCC && finalRunning < 0 ? `Cr ${formatCurrency(Math.abs(finalRunning), accSym)}` : formatCurrency(finalRunning, accSym)}
                             </span>
                           </div>
                           <p className="text-[11px] mb-3" style={{ color: 'var(--text-muted)' }}>
@@ -367,7 +367,7 @@ export default function AccountsPage() {
                                       <td className="py-2 pr-2 text-right whitespace-nowrap font-semibold" style={{ color: positive ? 'var(--text-success)' : 'var(--text-danger)' }}>
                                         {positive ? '+' : '−'}{formatCurrency(Math.abs(e.delta), accSym)}
                                       </td>
-                                      <td className="py-2 px-2 text-right whitespace-nowrap font-bold rounded-r-md" style={{ color: 'var(--text-primary)' }}>{formatCurrency(e.running ?? 0, accSym)}</td>
+                                      <td className="py-2 px-2 text-right whitespace-nowrap font-bold rounded-r-md" style={{ color: 'var(--text-primary)' }}>{isCC && (e.running ?? 0) < 0 ? `Cr ${formatCurrency(Math.abs(e.running ?? 0), accSym)}` : formatCurrency(e.running ?? 0, accSym)}</td>
                                     </tr>
                                   );
                                 })}

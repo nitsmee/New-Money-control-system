@@ -276,7 +276,7 @@ export default function FixedExpensesPage() {
                   <label className="form-label">From Account *</label>
                   <select className="form-select" value={form.from_account_id} onChange={e => setForm({ ...form, from_account_id: e.target.value })}>
                     <option value="">Select…</option>
-                    {activeAccounts.map(a => <option key={a.id} value={a.id}>{a.name}{a.is_credit_card ? ' (CC)' : ''}</option>)}
+                    {(form.type === 'saving' || form.type === 'investment' ? nonCcAccounts : activeAccounts).map(a => <option key={a.id} value={a.id}>{a.name}{a.is_credit_card ? ' (CC)' : ''}</option>)}
                   </select>
                 </div>
                 <div className="form-group">

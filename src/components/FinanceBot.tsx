@@ -538,7 +538,7 @@ function answerNetWorth(q: string, data: BotData): string | null {
   const cash = k?.spendable_balance ?? 0;
   const savings = k?.savings_balance ?? 0;
   const cc = k?.total_cc_outstanding ?? 0;
-  const netWorth = cash + savings + investTotal - cc;
+  const netWorth = cash + savings + investTotal - cc + (k?.cc_credit_balance ?? 0);
   const lines = [
     `💎 Your net worth: **${fc(netWorth)}**`,
     '',
@@ -1071,7 +1071,7 @@ function buildContext(data: BotData, me: UserInfo): string {
     const investTotal = data.balances
       .filter(b => b.account.is_active && !b.is_credit_card && accountRole(b.account) === 'investment')
       .reduce((s, b) => s + b.balance, 0);
-    const netWorth = k.spendable_balance + k.savings_balance + investTotal - k.total_cc_outstanding;
+    const netWorth = k.spendable_balance + k.savings_balance + investTotal - k.total_cc_outstanding + (k.cc_credit_balance ?? 0);
     L.push(`Live KPIs: safe to spend ${fc(k.safe_to_spend)}, savings rate ${k.savings_rate.toFixed(1)}%, net cashflow ${fc(k.net_cashflow)}, spendable ${fc(k.spendable_balance)}, savings balance ${fc(k.savings_balance)}, CC outstanding ${fc(k.total_cc_outstanding)}, net worth ${fc(netWorth)}.`);
   }
 

@@ -90,7 +90,7 @@ export function calculateAccountBalances(
         // Pay the card from a bank account.
         // Bank (from) goes down in its currency; CC (to) outstanding goes down
         // in the card's currency (converted if different).
-        add(tx.from_account_id, -tx.amount);
+        add(tx.from_account_id, isCC(tx.from_account_id) ? tx.amount : -tx.amount);
         add(tx.to_account_id, -toLeg(tx.amount, tx.from_account_id, tx.to_account_id));
         break;
       }
@@ -190,6 +190,12 @@ export function calculateDashboardKPIs(
   const total_cc_outstanding = balances
     .filter(b => b.is_credit_card && b.account.is_active && b.account.include_in_dashboard !== false)
     .reduce((s, b) => s + (b.outstanding ?? 0), 0);
+  // Overpaid cards (raw < 0) hold a CREDIT balance — a real asset that the
+  // clamped `outstanding` (>= 0) drops. Captured here so net worth adds it back.
+  // (b.balance = -raw for a card → positive when overpaid.)
+  const cc_credit_balance = balances
+    .filter(b => b.is_credit_card && b.account.is_active && b.account.include_in_dashboard !== false)
+    .reduce((s, b) => s + Math.max(0, b.balance), 0);
 
   // Period income
   const total_income = filteredIncome.reduce((s, i) => s + i.amount, 0);
@@ -289,6 +295,7 @@ export function calculateDashboardKPIs(
     spendable_balance,
     savings_balance,
     total_cc_outstanding,
+    cc_credit_balance,
     total_income,
     true_income,
     total_expense,
@@ -850,7 +857,7 @@ export function accountLedger(
         if (toMe) { const v = toThis(t.amount, t.from_account_id); delta += isCC ? -v : v; }
         break;
       case 'credit_card_payment':
-        if (fromMe) delta += -t.amount;
+        if (fromMe) delta += isCC ? t.amount : -t.amount;
         if (toMe) delta += -toThis(t.amount, t.from_account_id);
         break;
       case 'saving':
@@ -931,7 +938,7 @@ export function runningBalanceByEntry(
           break;
         }
         case 'credit_card_payment':
-          add(t.from_account_id, -t.amount);
+          add(t.from_account_id, isCC(t.from_account_id) ? t.amount : -t.amount);
           add(t.to_account_id, -toAcct(t.amount, t.from_account_id, t.to_account_id));
           break;
         case 'saving': {
