@@ -323,7 +323,7 @@ export default function GoalsPage() {
         )}
         {goalAnalyses.map(({ goal:g, available_saving, remaining_gap, can_buy_now, months_needed, risk_level, suggested_action, progress_percent, allocSource, allocated, timeline }) => (
           <div key={g.id} className={`card card-p group relative overflow-hidden ${can_buy_now ? 'border-emerald-200 dark:border-emerald-700' : ''}`}>
-            {can_buy_now && <div className="absolute top-0 right-0 w-20 h-20 bg-emerald-500/10 rounded-bl-full"/>}
+            {can_buy_now && <div className="absolute top-0 right-0 w-20 h-20 bg-emerald-500/10 rounded-bl-full pointer-events-none"/>}
             <div className="flex items-start justify-between mb-2">
               <div>
                 <div className="flex items-center gap-2 mb-0.5">
@@ -333,7 +333,7 @@ export default function GoalsPage() {
                 <h3 className="font-bold text-base">{g.name}</h3>
                 {g.goal_type && <p className="text-xs" style={{ color:'var(--text-muted)' }}>{g.goal_type}</p>}
               </div>
-              <div className="flex gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+              <div className="relative z-10 flex gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                 <button onClick={() => openEdit(g)} className="btn-icon text-slate-400 hover:text-blue-600"><Pencil size={13}/></button>
                 <button onClick={() => handleDelete(g)} className="btn-icon text-slate-400 hover:text-red-600"><Trash2 size={13}/></button>
               </div>
