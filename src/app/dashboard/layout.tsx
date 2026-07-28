@@ -8,7 +8,7 @@ import { useAppStore } from '@/lib/store/appStore';
 import {
   LayoutDashboard, TrendingUp, ArrowLeftRight, Repeat, PieChart, Target,
   BarChart3, Settings, Bell, LogOut, Menu, X, ChevronLeft, Sun, Moon,
-  Monitor, Wallet, Landmark, Search, CalendarClock, Trash2, Zap, HandCoins
+  Monitor, Wallet, Landmark, Search, Zap, HandCoins
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { GlobalSearch } from '@/components/GlobalSearch';
@@ -23,18 +23,17 @@ const NAV = [
   { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, key: 'D' },
   { label: 'Quick Add', href: '/dashboard/quick-add', icon: Zap, key: 'Q' },
   { label: 'Accounts', href: '/dashboard/accounts', icon: Landmark, key: 'A' },
-  { label: 'Income', href: '/dashboard/income', icon: TrendingUp, key: 'I' },
-  { label: 'Recurring Income', href: '/dashboard/recurring-income', icon: CalendarClock, key: '' },
   { label: 'Transactions', href: '/dashboard/transactions', icon: ArrowLeftRight, key: 'T' },
-  { label: 'Fixed Expenses', href: '/dashboard/fixed-expenses', icon: Repeat, key: '' },
+  { label: 'Income', href: '/dashboard/income', icon: TrendingUp, key: 'I' },
+  { label: 'Recurring', href: '/dashboard/recurring', icon: Repeat, key: '' },
   { label: 'Budget', href: '/dashboard/budget', icon: PieChart, key: 'B' },
   { label: 'Goals', href: '/dashboard/goals', icon: Target, key: 'G' },
   { label: 'Lend & Borrow', href: '/dashboard/debts', icon: HandCoins, key: '' },
   { label: 'Reports', href: '/dashboard/reports', icon: BarChart3, key: 'R' },
-  { label: 'Alerts', href: '/dashboard/alerts', icon: Bell, key: '' },
-  { label: 'Recycle Bin', href: '/dashboard/recycle-bin', icon: Trash2, key: '' },
   { label: 'Settings', href: '/dashboard/settings', icon: Settings, key: ',' },
 ];
+// Alerts + Recycle Bin were pulled out of the primary nav: Alerts is now the
+// bell in the sidebar/header; Recycle Bin lives under Settings.
 
 // The five most-used pages for the mobile bottom bar (full list is in the
 // hamburger menu). Reports is here by request; Recurring Income lives in the menu.
@@ -271,7 +270,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <NavLinks />
         {/* Bottom controls */}
         <div className={`p-3 border-t border-slate-100 dark:border-slate-700 flex ${sidebarOpen ? 'items-center justify-between' : 'flex-col items-center gap-2'}`}>
-          <ThemeCycler />
+          <div className="flex items-center gap-1">
+            <ThemeCycler />
+            <Link href="/dashboard/alerts" title="Alerts" className={`btn-icon ${pathname === '/dashboard/alerts' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}><Bell size={16} /></Link>
+          </div>
           {sidebarOpen && user && (
             <div className="flex items-center gap-2 min-w-0 flex-1 mx-2">
               <div className="w-7 h-7 rounded-full bg-blue-100 dark:bg-blue-900 flex items-center justify-center flex-shrink-0">
@@ -316,7 +318,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </div>
         <NavLinks />
         <div className="p-4 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between">
-          <ThemeCycler />
+          <div className="flex items-center gap-1">
+            <ThemeCycler />
+            <Link href="/dashboard/alerts" title="Alerts" className={`btn-icon ${pathname === '/dashboard/alerts' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}><Bell size={16} /></Link>
+          </div>
           <button onClick={handleLogout} className="btn-icon text-red-400 hover:text-red-600 hover:bg-red-50" title="Sign out">
             <LogOut size={16} />
           </button>
@@ -335,6 +340,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             <span className="font-bold text-sm">Money Control</span>
           </div>
           <div className="flex items-center gap-1">
+            <Link href="/dashboard/alerts" title="Alerts" className={`btn-icon ${pathname === '/dashboard/alerts' ? 'text-blue-600' : ''}`}><Bell size={16} /></Link>
             <SearchButton />
             <ThemeCycler />
           </div>

@@ -4,6 +4,7 @@ import { useAppStore } from '@/lib/store/appStore';
 import { createClient } from '@/lib/supabase/client';
 import { Account, Category, Owner, UserSettings } from '@/types';
 import toast from 'react-hot-toast';
+import Link from 'next/link';
 import { Plus, Pencil, Trash2, X, Check, Settings, Database, User, Tag, Wallet, Download, Upload, RefreshCw, Coins } from 'lucide-react';
 import Papa from 'papaparse';
 import { currencyLabel, currencySymbol, CURRENCY_CODES } from '@/lib/utils/calculations';
@@ -338,7 +339,10 @@ export default function SettingsPage() {
           <h1 className="page-title">Master Settings</h1>
           <p className="text-sm" style={{ color:'var(--text-secondary)' }}>Manage accounts, categories, owners, and app preferences</p>
         </div>
-        <button onClick={exportAllData} className="btn-md btn-secondary"><Download size={16}/> Export Backup</button>
+        <div className="flex items-center gap-2">
+          <Link href="/dashboard/recycle-bin" className="btn-md btn-secondary"><Trash2 size={16}/> Recycle Bin</Link>
+          <button onClick={exportAllData} className="btn-md btn-secondary"><Download size={16}/> Export Backup</button>
+        </div>
       </div>
 
       {/* Tab Bar */}

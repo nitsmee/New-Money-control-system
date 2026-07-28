@@ -12,11 +12,12 @@ const OWE = '#f43f5e';   // I owe (rose)
 const OWED = '#10b981';  // owed to me (emerald)
 
 export default function DebtsPage() {
-  const { debts, settings, addDebt, updateDebt, removeDebt } = useAppStore();
+  const { debts, accounts, settings, addDebt, updateDebt, removeDebt, addTransaction, addIncome } = useAppStore();
   const sb = createClient();
   const confirm = useConfirm();
   const sym = settings?.currency_symbol ?? '₹';
   const base = settings?.currency ?? 'INR';
+  const nonCcAccounts = useMemo(() => accounts.filter(a => a.is_active && !a.is_credit_card), [accounts]);
 
   const sorted = useMemo(() => [...debts].sort((a, b) =>
     (Number(a.is_settled) - Number(b.is_settled)) || b.date.localeCompare(a.date) || (b.created_at || '').localeCompare(a.created_at || '')
@@ -69,6 +70,42 @@ export default function DebtsPage() {
       toast.success(settledNow ? 'Marked settled' : 'Reopened');
     } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Failed'); }
   };
+
+  // Settle with an optional record of the real money movement (so balances update).
+  const [settleFor, setSettleFor] = useState<Debt | null>(null);
+  const [settleRecord, setSettleRecord] = useState(true);
+  const [settleAcct, setSettleAcct] = useState('');
+  const [settling, setSettling] = useState(false);
+  const openSettle = (d: Debt) => { setSettleFor(d); setSettleRecord(true); setSettleAcct(nonCcAccounts[0]?.id ?? ''); };
+  const doSettle = async () => {
+    if (!settleFor) return;
+    const d = settleFor;
+    setSettling(true);
+    try {
+      const { data: { user } } = await sb.auth.getUser();
+      if (!user) { toast.error('Not authenticated'); return; }
+      const today = new Date().toISOString().split('T')[0];
+      if (settleRecord && settleAcct) {
+        if (d.direction === 'i_owe') {
+          const id = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+          const tx = { id, date: today, amount: d.amount, type: 'expense', category: null, owner_purpose: 'Personal', from_account_id: settleAcct, to_account_id: null, description: `Repaid ${d.person}`, period: today.slice(0, 7), is_fixed_expense_auto: false, user_id: user.id };
+          const { data, error } = await sb.from('transactions').insert(tx).select().single();
+          if (error) throw error;
+          addTransaction(data);
+        } else {
+          const inc = { date: today, amount: d.amount, source: d.person, category: 'Reimbursement', owner_purpose: 'Personal', to_account_id: settleAcct, notes: `Repayment from ${d.person}`, include_in_true_income: false, period: today.slice(0, 7), user_id: user.id };
+          const { data, error } = await sb.from('income').insert(inc).select().single();
+          if (error) throw error;
+          addIncome(data);
+        }
+      }
+      const { data: dd, error: de } = await sb.from('debts').update({ is_settled: true, settled_at: new Date().toISOString() }).eq('id', d.id).select().single();
+      if (de) throw de;
+      updateDebt(d.id, dd);
+      toast.success(settleRecord && settleAcct ? 'Settled & recorded' : 'Marked settled');
+      setSettleFor(null);
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Failed'); } finally { setSettling(false); }
+  };
   const del = async (d: Debt) => {
     if (!(await confirm({ title: 'Delete entry?', message: `Delete the ${d.direction === 'i_owe' ? 'amount you owe' : 'amount owed to you by'} ${d.person}?`, confirmLabel: 'Delete', danger: true }))) return;
     try { const { error } = await sb.from('debts').delete().eq('id', d.id); if (error) throw error; removeDebt(d.id); toast.success('Deleted'); }
@@ -94,7 +131,7 @@ export default function DebtsPage() {
         <p className="font-bold text-base whitespace-nowrap relative z-10" style={{ color: c }}>{formatCurrency(d.amount, sym)}</p>
         <div className="flex gap-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity relative z-10">
           {!d.is_settled
-            ? <button onClick={() => setSettled(d, true)} aria-label="Mark settled" className="btn-icon text-slate-400 hover:text-emerald-600"><Check size={15} /></button>
+            ? <button onClick={() => openSettle(d)} aria-label="Mark settled" className="btn-icon text-slate-400 hover:text-emerald-600"><Check size={15} /></button>
             : <button onClick={() => setSettled(d, false)} aria-label="Reopen" className="btn-icon text-slate-400 hover:text-blue-600"><RotateCcw size={14} /></button>}
           <button onClick={() => openEdit(d)} aria-label="Edit" className="btn-icon text-slate-400 hover:text-blue-600"><Pencil size={13} /></button>
           <button onClick={() => del(d)} aria-label="Delete" className="btn-icon text-slate-400 hover:text-red-600"><Trash2 size={13} /></button>
@@ -148,6 +185,40 @@ export default function DebtsPage() {
               {settled.map(d => <Row key={d.id} d={d} />)}
             </div>
           )}
+        </div>
+      )}
+
+      {settleFor && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'var(--bg-overlay)' }} onClick={() => !settling && setSettleFor(null)}>
+          <div className="card w-full max-w-sm rounded-2xl animate-fade-in-up" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-5 pb-3">
+              <h2 className="text-lg font-semibold truncate">Settle · {settleFor.person}</h2>
+              <button onClick={() => setSettleFor(null)} className="btn-icon flex-shrink-0"><X size={18} /></button>
+            </div>
+            <div className="px-5 pb-5 space-y-3">
+              <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                {settleFor.direction === 'i_owe' ? 'You repay ' : 'You receive '}<strong style={{ color: 'var(--text-primary)' }}>{formatCurrency(settleFor.amount, sym)}</strong>{settleFor.direction === 'i_owe' ? ` to ${settleFor.person}.` : ` from ${settleFor.person}.`}
+              </p>
+              <label className="flex items-center gap-2 cursor-pointer text-sm">
+                <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={settleRecord} onChange={e => setSettleRecord(e.target.checked)} />
+                Also record the money {settleFor.direction === 'i_owe' ? 'leaving' : 'arriving in'} an account
+              </label>
+              {settleRecord && (
+                <div className="form-group">
+                  <label className="form-label">{settleFor.direction === 'i_owe' ? 'Paid from' : 'Received into'}</label>
+                  <select className="form-select" value={settleAcct} onChange={e => setSettleAcct(e.target.value)}>
+                    <option value="">Select account…</option>
+                    {nonCcAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                  </select>
+                  <p className="form-hint">Adds {settleFor.direction === 'i_owe' ? 'an expense' : 'income'} so your balance updates. Untick to just mark it settled.</p>
+                </div>
+              )}
+              <button onClick={doSettle} disabled={settling || (settleRecord && !settleAcct)} className="btn-md btn-primary w-full justify-center">
+                {settling ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Check size={16} />}
+                {settling ? 'Settling…' : 'Settle'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
