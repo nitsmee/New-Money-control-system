@@ -2,7 +2,7 @@
   "name": "Money Control System",
   "short_name": "MoneyCtrl",
   "description": "Your complete personal finance management system",
-  "start_url": "/dashboard",
+  "start_url": "/dashboard/quick-add",
   "display": "standalone",
   "background_color": "#f8fafc",
   "theme_color": "#1d4ed8",
@@ -19,9 +19,9 @@
   ],
   "shortcuts": [
     {
-      "name": "Add Transaction",
-      "url": "/dashboard/transactions",
-      "description": "Quickly add a new transaction"
+      "name": "Quick Add",
+      "url": "/dashboard/quick-add",
+      "description": "Log a transaction fast with a saved shortcut"
     },
     {
       "name": "View Dashboard",
