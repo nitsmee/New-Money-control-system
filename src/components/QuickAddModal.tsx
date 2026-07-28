@@ -15,25 +15,24 @@ interface Props {
   onSaved: () => void;
 }
 
-const EXPENSE_CATEGORIES = [
-  'Food', 'Transport', 'Shopping', 'Bills', 'Health', 'Entertainment',
-  'Education', 'Groceries', 'Fuel', 'Travel', 'Personal Care', 'Other',
-];
-
 export function QuickAddModal({ isOpen, onClose, onSaved }: Props) {
   const today = new Date().toISOString().slice(0, 10);
   const [date, setDate] = useState(today);
   const [amount, setAmount] = useState('');
   const [type, setType] = useState<'expense' | 'saving'>('expense');
-  const [category, setCategory] = useState(EXPENSE_CATEGORIES[0]);
+  const [category, setCategory] = useState(() => {
+    const c = useAppStore.getState().categories.find(x => x.is_active && (x.type === 'expense' || x.type === 'all'));
+    return c?.name ?? '';
+  });
   const [fromAccountId, setFromAccountId] = useState('');
   const [saving, setSaving] = useState(false);
 
   const [toAccountId, setToAccountId] = useState('');
 
-  const { accounts, income, transactions, settings } = useAppStore();
+  const { accounts, income, transactions, settings, categories } = useAppStore();
   const confirm = useConfirm();
   const activeAccounts = accounts.filter(a => a.is_active && !a.is_credit_card);
+  const expenseCats = categories.filter(c => c.is_active && (c.type === 'expense' || c.type === 'all'));
 
   // Savings accounts: prefer include_in_goal_savings or 'saving' in account_type; fall back to all non-CC
   const savingsAccounts = (() => {
@@ -188,8 +187,9 @@ export function QuickAddModal({ isOpen, onClose, onSaved }: Props) {
               value={category}
               onChange={e => setCategory(e.target.value)}
             >
-              {EXPENSE_CATEGORIES.map(c => (
-                <option key={c} value={c}>{c}</option>
+              <option value="">Select…</option>
+              {expenseCats.map(c => (
+                <option key={c.id} value={c.name}>{c.name}</option>
               ))}
             </select>
           </div>
