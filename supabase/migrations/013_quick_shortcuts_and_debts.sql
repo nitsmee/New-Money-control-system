@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS quick_shortcuts (
   to_account_id UUID,
   description TEXT,
   color TEXT,                             -- accent hex for the tile
+  ask_amount BOOLEAN NOT NULL DEFAULT false, -- true = prompt for the amount on tap (variable); false = amount * quantity
   sort_order INT NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

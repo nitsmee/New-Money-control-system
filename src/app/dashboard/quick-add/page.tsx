@@ -28,12 +28,15 @@ export default function QuickAddPage() {
   const shortcuts = useMemo(() => [...quickShortcuts].sort((a, b) => (a.sort_order - b.sort_order) || a.label.localeCompare(b.label)), [quickShortcuts]);
 
   // ---------- Run (tap) a shortcut ----------
-  const [run, setRun] = useState<{ sc: QuickShortcut; qty: number } | null>(null);
+  const [run, setRun] = useState<{ sc: QuickShortcut; qty: number; amount: number } | null>(null);
   const [adding, setAdding] = useState(false);
   const doAdd = async () => {
     if (!run) return;
     const { sc } = run;
     const q = Math.max(1, Math.round(run.qty || 1));
+    // Variable-price shortcut → use the amount typed on tap; otherwise unit × qty.
+    const finalAmount = sc.ask_amount ? +(+run.amount || 0).toFixed(2) : +(sc.amount * q).toFixed(2);
+    if (!(finalAmount > 0)) { toast.error('Enter an amount greater than 0'); return; }
     setAdding(true);
     try {
       const { data: { user } } = await sb.auth.getUser();
@@ -41,12 +44,12 @@ export default function QuickAddPage() {
       const today = new Date().toISOString().split('T')[0];
       const id = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
       const payload = {
-        id, date: today, amount: +(sc.amount * q).toFixed(2), type: sc.type,
+        id, date: today, amount: finalAmount, type: sc.type,
         category: sc.category || null,
         owner_purpose: sc.type === 'expense' ? (sc.owner_purpose || null) : null,
         from_account_id: sc.from_account_id || null,
         to_account_id: sc.type === 'expense' ? null : (sc.to_account_id || null),
-        description: q > 1 ? `${q} × ${sc.label}` : (sc.description || sc.label),
+        description: (!sc.ask_amount && q > 1) ? `${q} × ${sc.label}` : (sc.description || sc.label),
         period: today.slice(0, 7), is_fixed_expense_auto: false, user_id: user.id,
       };
       const warns = checkEntryWarnings(payload, balances, base);
@@ -77,19 +80,19 @@ export default function QuickAddPage() {
   };
 
   // ---------- Create / edit a shortcut ----------
-  const EMPTY = { label: '', type: 'expense' as QuickShortcut['type'], amount: 0, category: '', owner_purpose: 'Personal', from_account_id: '', to_account_id: '', description: '', color: '#6366f1' };
+  const EMPTY = { label: '', type: 'expense' as QuickShortcut['type'], amount: 0, category: '', owner_purpose: 'Personal', from_account_id: '', to_account_id: '', description: '', color: '#6366f1', ask_amount: false };
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<QuickShortcut | null>(null);
   const [form, setForm] = useState({ ...EMPTY });
   const [savingForm, setSavingForm] = useState(false);
   const openNew = () => { setEditing(null); setForm({ ...EMPTY, from_account_id: nonCcAccounts[0]?.id ?? '', category: activeCategories[0]?.name ?? '', owner_purpose: activeOwners[0]?.name ?? 'Personal' }); setShowForm(true); };
-  const openEdit = (sc: QuickShortcut) => { setEditing(sc); setForm({ label: sc.label, type: sc.type, amount: sc.amount, category: sc.category ?? '', owner_purpose: sc.owner_purpose ?? 'Personal', from_account_id: sc.from_account_id ?? '', to_account_id: sc.to_account_id ?? '', description: sc.description ?? '', color: sc.color ?? '#6366f1' }); setShowForm(true); };
+  const openEdit = (sc: QuickShortcut) => { setEditing(sc); setForm({ label: sc.label, type: sc.type, amount: sc.amount, category: sc.category ?? '', owner_purpose: sc.owner_purpose ?? 'Personal', from_account_id: sc.from_account_id ?? '', to_account_id: sc.to_account_id ?? '', description: sc.description ?? '', color: sc.color ?? '#6366f1', ask_amount: sc.ask_amount ?? false }); setShowForm(true); };
   const needsTo = form.type === 'transfer' || form.type === 'saving';
   const fromPool = form.type === 'saving' ? nonCcAccounts : activeAccounts;
 
   const saveForm = async () => {
     if (!form.label.trim()) { toast.error('Give the shortcut a name'); return; }
-    if (!(+form.amount > 0)) { toast.error('Amount must be greater than 0'); return; }
+    if (!form.ask_amount && !(+form.amount > 0)) { toast.error('Amount must be greater than 0'); return; }
     if (!form.from_account_id) { toast.error('Pick a "From" account'); return; }
     if (needsTo && !form.to_account_id) { toast.error('Pick a destination account'); return; }
     if (needsTo && form.from_account_id === form.to_account_id) { toast.error('From and To must differ'); return; }
@@ -98,7 +101,7 @@ export default function QuickAddPage() {
       const { data: { user } } = await sb.auth.getUser();
       if (!user) { toast.error('Not authenticated'); return; }
       const payload = {
-        label: form.label.trim(), type: form.type, amount: +form.amount,
+        label: form.label.trim(), type: form.type, amount: +form.amount || 0, ask_amount: form.ask_amount,
         category: form.category || null,
         owner_purpose: form.type === 'expense' ? (form.owner_purpose || null) : null,
         from_account_id: form.from_account_id || null,
@@ -149,7 +152,7 @@ export default function QuickAddPage() {
             return (
               <div
                 key={sc.id}
-                onClick={() => setRun({ sc, qty: 1 })}
+                onClick={() => setRun({ sc, qty: 1, amount: sc.amount || 0 })}
                 className="card card-p relative overflow-hidden group cursor-pointer transition-all duration-200 hover:-translate-y-1 hover:shadow-xl active:scale-[0.99] animate-fade-in-up"
                 style={{ background: `color-mix(in srgb, ${color} 12%, var(--bg-surface))`, borderColor: `color-mix(in srgb, ${color} 28%, var(--border-default))` }}
               >
@@ -181,12 +184,19 @@ export default function QuickAddPage() {
               <button onClick={() => setRun(null)} className="btn-icon flex-shrink-0"><X size={16} /></button>
             </div>
             <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>{run.sc.type} · {acctName(run.sc.from_account_id)}{run.sc.category ? ` · ${run.sc.category}` : ''}</p>
-            <div className="flex items-center justify-center gap-4">
-              <button onClick={() => setRun(r => r && ({ ...r, qty: Math.max(1, r.qty - 1) }))} className="btn-icon" aria-label="Less"><Minus size={18} /></button>
-              <input type="number" min="1" step="1" value={run.qty} onChange={e => setRun(r => r && ({ ...r, qty: Math.max(1, Math.round(+e.target.value || 1)) }))} className="form-input w-20 text-center text-lg font-bold" />
-              <button onClick={() => setRun(r => r && ({ ...r, qty: r.qty + 1 }))} className="btn-icon" aria-label="More"><Plus size={18} /></button>
-            </div>
-            <p className="text-center text-2xl font-bold my-3" style={{ color: run.sc.color || '#6366f1' }}>{formatCurrency(run.sc.amount * Math.max(1, run.qty), acctSym(run.sc.from_account_id))}</p>
+            {run.sc.ask_amount ? (
+              <div className="form-group">
+                <label className="form-label text-center">Amount</label>
+                <input type="number" autoFocus min="0.01" step="0.01" placeholder="0" value={run.amount || ''} onChange={e => setRun(r => r && ({ ...r, amount: +e.target.value }))} className="form-input text-center text-lg font-bold" />
+              </div>
+            ) : (
+              <div className="flex items-center justify-center gap-4">
+                <button onClick={() => setRun(r => r && ({ ...r, qty: Math.max(1, r.qty - 1) }))} className="btn-icon" aria-label="Less"><Minus size={18} /></button>
+                <input type="number" min="1" step="1" value={run.qty} onChange={e => setRun(r => r && ({ ...r, qty: Math.max(1, Math.round(+e.target.value || 1)) }))} className="form-input w-20 text-center text-lg font-bold" />
+                <button onClick={() => setRun(r => r && ({ ...r, qty: r.qty + 1 }))} className="btn-icon" aria-label="More"><Plus size={18} /></button>
+              </div>
+            )}
+            <p className="text-center text-2xl font-bold my-3" style={{ color: run.sc.color || '#6366f1' }}>{formatCurrency(run.sc.ask_amount ? (run.amount || 0) : run.sc.amount * Math.max(1, run.qty), acctSym(run.sc.from_account_id))}</p>
             <button onClick={doAdd} disabled={adding} className="btn-md btn-primary w-full justify-center">
               {adding ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Check size={16} />}
               {adding ? 'Adding…' : 'Add transaction'}
@@ -212,8 +222,12 @@ export default function QuickAddPage() {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="form-group"><label className="form-label">Name *</label><input type="text" className="form-input" placeholder="e.g. Cigarette" value={form.label} onChange={e => setForm({ ...form, label: e.target.value })} /></div>
-                <div className="form-group"><label className="form-label">Unit amount *</label><input type="number" className="form-input" placeholder="25" min="0.01" step="0.01" value={form.amount || ''} onChange={e => setForm({ ...form, amount: +e.target.value })} /></div>
+                <div className="form-group"><label className="form-label">{form.ask_amount ? 'Default amount' : 'Unit amount *'}</label><input type="number" className="form-input" placeholder="25" min="0" step="0.01" value={form.amount || ''} onChange={e => setForm({ ...form, amount: +e.target.value })} disabled={form.ask_amount} /></div>
               </div>
+              <label className="flex items-center gap-2 cursor-pointer text-sm">
+                <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={form.ask_amount} onChange={e => setForm({ ...form, ask_amount: e.target.checked })} />
+                Ask for the amount each time (variable price — no fixed rate)
+              </label>
               <div className="form-group">
                 <label className="form-label">{form.type === 'saving' ? 'From (pay with)' : 'From account'} *</label>
                 <select className="form-select" value={form.from_account_id} onChange={e => setForm({ ...form, from_account_id: e.target.value })}>

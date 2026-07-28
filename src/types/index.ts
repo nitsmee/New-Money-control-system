@@ -289,6 +289,7 @@ export interface QuickShortcut {
   to_account_id?: string | null;
   description?: string | null;
   color?: string | null;          // accent hex for the tile
+  ask_amount?: boolean;           // true = prompt for the amount on tap (variable price)
   sort_order: number;
   created_at: string;
 }
