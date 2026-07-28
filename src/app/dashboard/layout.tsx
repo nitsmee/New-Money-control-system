@@ -8,7 +8,7 @@ import { useAppStore } from '@/lib/store/appStore';
 import {
   LayoutDashboard, TrendingUp, ArrowLeftRight, Repeat, PieChart, Target,
   BarChart3, Settings, Bell, LogOut, Menu, X, ChevronLeft, Sun, Moon,
-  Monitor, Wallet, Landmark, Search, CalendarClock, Trash2
+  Monitor, Wallet, Landmark, Search, CalendarClock, Trash2, Zap, HandCoins
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { GlobalSearch } from '@/components/GlobalSearch';
@@ -21,6 +21,7 @@ import { ConfirmProvider } from '@/components/ConfirmDialog';
 
 const NAV = [
   { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, key: 'D' },
+  { label: 'Quick Add', href: '/dashboard/quick-add', icon: Zap, key: 'Q' },
   { label: 'Accounts', href: '/dashboard/accounts', icon: Landmark, key: 'A' },
   { label: 'Income', href: '/dashboard/income', icon: TrendingUp, key: 'I' },
   { label: 'Recurring Income', href: '/dashboard/recurring-income', icon: CalendarClock, key: '' },
@@ -28,6 +29,7 @@ const NAV = [
   { label: 'Fixed Expenses', href: '/dashboard/fixed-expenses', icon: Repeat, key: '' },
   { label: 'Budget', href: '/dashboard/budget', icon: PieChart, key: 'B' },
   { label: 'Goals', href: '/dashboard/goals', icon: Target, key: 'G' },
+  { label: 'Lend & Borrow', href: '/dashboard/debts', icon: HandCoins, key: '' },
   { label: 'Reports', href: '/dashboard/reports', icon: BarChart3, key: 'R' },
   { label: 'Alerts', href: '/dashboard/alerts', icon: Bell, key: '' },
   { label: 'Recycle Bin', href: '/dashboard/recycle-bin', icon: Trash2, key: '' },
@@ -38,6 +40,7 @@ const NAV = [
 // hamburger menu). Reports is here by request; Recurring Income lives in the menu.
 const MOBILE_NAV = [
   { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+  { label: 'Quick Add', href: '/dashboard/quick-add', icon: Zap },
   { label: 'Transactions', href: '/dashboard/transactions', icon: ArrowLeftRight },
   { label: 'Budget', href: '/dashboard/budget', icon: PieChart },
   { label: 'Reports', href: '/dashboard/reports', icon: BarChart3 },

@@ -2,7 +2,8 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import {
   Account, Category, Owner, Income, Transaction,
-  FixedExpense, Budget, Goal, UserSettings, DateFilter, RecurringIncome
+  FixedExpense, Budget, Goal, UserSettings, DateFilter, RecurringIncome,
+  QuickShortcut, Debt
 } from '@/types';
 import { createClient } from '@/lib/supabase/client';
 
@@ -18,6 +19,8 @@ interface AppState {
   fixedExpenses: FixedExpense[];
   budgets: Budget[];
   goals: Goal[];
+  quickShortcuts: QuickShortcut[];
+  debts: Debt[];
 
   // Settings & UI
   settings: UserSettings | null;
@@ -77,6 +80,14 @@ interface AppState {
   updateOwner: (id: string, o: Partial<Owner>) => void;
   removeOwner: (id: string) => void;
 
+  addQuickShortcut: (q: QuickShortcut) => void;
+  updateQuickShortcut: (id: string, q: Partial<QuickShortcut>) => void;
+  removeQuickShortcut: (id: string) => void;
+
+  addDebt: (d: Debt) => void;
+  updateDebt: (id: string, d: Partial<Debt>) => void;
+  removeDebt: (id: string) => void;
+
   updateSettings: (s: Partial<UserSettings>) => void;
 }
 
@@ -94,6 +105,8 @@ export const useAppStore = create<AppState>()(
       budgets: [],
       goals: [],
       recurringIncome: [],
+      quickShortcuts: [],
+      debts: [],
       settings: null,
       dateFilter: {
         view: 'monthly',
@@ -125,6 +138,8 @@ export const useAppStore = create<AppState>()(
             { data: goals },
             { data: settings },
             { data: recurringIncomeData },
+            { data: quickShortcuts },
+            { data: debts },
           ] = await Promise.all([
             sb.from('accounts').select('*').eq('user_id', userId).order('sort_order'),
             sb.from('categories').select('*').eq('user_id', userId).order('sort_order'),
@@ -136,6 +151,10 @@ export const useAppStore = create<AppState>()(
             sb.from('goals').select('*').eq('user_id', userId).order('priority'),
             sb.from('user_settings').select('*').eq('user_id', userId).single(),
             sb.from('recurring_income').select('*').eq('user_id', userId).order('created_at'),
+            // New (migration 013) tables — a missing table returns { data: null }
+            // (not a throw), so these never break the core load before migrating.
+            sb.from('quick_shortcuts').select('*').eq('user_id', userId).order('sort_order'),
+            sb.from('debts').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
           ]);
 
           set({
@@ -149,6 +168,8 @@ export const useAppStore = create<AppState>()(
             goals: goals ?? [],
             settings: settings ?? null,
             recurringIncome: recurringIncomeData ?? [],
+            quickShortcuts: quickShortcuts ?? [],
+            debts: debts ?? [],
           });
         } catch (e) {
           // A failed fetch must never leave the app stuck on the loading
@@ -218,6 +239,16 @@ export const useAppStore = create<AppState>()(
       addOwner: (o) => set(s => ({ owners: [...s.owners, o] })),
       updateOwner: (id, data) => set(s => ({ owners: s.owners.map(o => o.id === id ? { ...o, ...data } : o) })),
       removeOwner: (id) => set(s => ({ owners: s.owners.filter(o => o.id !== id) })),
+
+      // Quick-Add shortcut CRUD
+      addQuickShortcut: (q) => set(s => ({ quickShortcuts: [...s.quickShortcuts, q] })),
+      updateQuickShortcut: (id, data) => set(s => ({ quickShortcuts: s.quickShortcuts.map(x => x.id === id ? { ...x, ...data } : x) })),
+      removeQuickShortcut: (id) => set(s => ({ quickShortcuts: s.quickShortcuts.filter(x => x.id !== id) })),
+
+      // Debt (lend & borrow) CRUD
+      addDebt: (d) => set(s => ({ debts: [d, ...s.debts] })),
+      updateDebt: (id, data) => set(s => ({ debts: s.debts.map(x => x.id === id ? { ...x, ...data } : x) })),
+      removeDebt: (id) => set(s => ({ debts: s.debts.filter(x => x.id !== id) })),
 
       updateSettings: (s) => set(prev => ({ settings: prev.settings ? { ...prev.settings, ...s } : null })),
     }),

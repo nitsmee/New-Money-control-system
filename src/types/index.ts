@@ -275,6 +275,39 @@ export interface AccountBalance {
   outstanding?: number; // for credit cards
 }
 
+// Quick-Add shortcut: a saved transaction template. Tapping it (× quantity)
+// inserts a real transaction using these preset fields.
+export interface QuickShortcut {
+  id: string;
+  user_id: string;
+  label: string;
+  type: 'expense' | 'transfer' | 'saving';
+  amount: number;                 // unit amount
+  category?: string | null;
+  owner_purpose?: string | null;
+  from_account_id?: string | null;
+  to_account_id?: string | null;
+  description?: string | null;
+  color?: string | null;          // accent hex for the tile
+  sort_order: number;
+  created_at: string;
+}
+
+// Lend & Borrow: money you owe someone, or money owed to you.
+export interface Debt {
+  id: string;
+  user_id: string;
+  direction: 'i_owe' | 'owed_to_me';
+  person: string;
+  amount: number;
+  currency?: string | null;
+  description?: string | null;
+  date: string;
+  is_settled: boolean;
+  settled_at?: string | null;
+  created_at: string;
+}
+
 export interface BudgetStatus {
   category: string;
   monthly_budget: number;
